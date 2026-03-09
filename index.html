@@ -323,7 +323,7 @@
 
         async function initMultiplayer() {
             try {
-                multiplayerClient = new MultiplayerClient('http://localhost:3000');
+                multiplayerClient = new MultiplayerClient('http://localhost:8080');
                 
                 // IMPORTANT: définir les callbacks AVANT connect() pour éviter la race condition
                 // Le serveur envoie playersExist dès la connexion
