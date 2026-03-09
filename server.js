@@ -106,6 +106,32 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Event: WebRTC Offer
+  socket.on('webrtc-offer', (data) => {
+    socket.to(data.to).emit('webrtc-offer', {
+      from: socket.id,
+      offer: data.offer
+    });
+    console.log(`[📤] Offre WebRTC relayée de ${socket.id} à ${data.to}`);
+  });
+
+  // Event: WebRTC Answer
+  socket.on('webrtc-answer', (data) => {
+    socket.to(data.to).emit('webrtc-answer', {
+      from: socket.id,
+      answer: data.answer
+    });
+    console.log(`[📥] Réponse WebRTC relayée de ${socket.id} à ${data.to}`);
+  });
+
+  // Event: WebRTC ICE Candidate
+  socket.on('webrtc-ice-candidate', (data) => {
+    socket.to(data.to).emit('webrtc-ice-candidate', {
+      from: socket.id,
+      candidate: data.candidate
+    });
+  });
+
   // Event: Déconnexion
   socket.on('disconnect', () => {
     console.log(`[✗] Joueur déconnecté: ${socket.id}`);
