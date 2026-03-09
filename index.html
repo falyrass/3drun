@@ -107,20 +107,11 @@
         let pendingPlayers = []; // Queue de joueurs en attente de création du mesh
         let otherPlayerLabels = {}; // { playerId: div HTML label 2D }
         
-        // Palette de couleurs pour les joueurs (10+ couleurs vibrantes et distinctes)
+        // Palette de couleurs pour les joueurs (tous en bleu)
         const COLOR_PALETTE = [
-            0xFF0000, // Rouge vif
-            0x0000FF, // Bleu vif
-            0xFFFF00, // Jaune vif
-            0xFF00FF, // Magenta
-            0x00FFFF, // Cyan
-            0xFF8800, // Orange
-            0x00FF00, // Vert vif
-            0xFF0088, // Rose
-            0x88FF00, // Vert-jaune
-            0x0088FF, // Bleu ciel
-            0xFF6600, // Orange-rouge
-            0x00FF88  // Vert-cyan
+            0x0066FF, 0x0080FF, 0x0099FF, 0x00AAFF, 0x00BBFF,
+            0x0033FF, 0x0044FF, 0x0055FF, 0x003399, 0x0055CC,
+            0x0077FF, 0x0088FF, 0x00BBFF
         ];
         let usedColors = []; // Couleurs déjà assignées
 
