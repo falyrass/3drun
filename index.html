@@ -179,7 +179,7 @@
                     camera.position.z - model.position.z
                 );
                 
-                model.rotation.y = angleCamera + moveData.angle + Math.PI / 2;
+                model.rotation.y = angleCamera + moveData.angle - Math.PI / 2;
 
                 const speed = MOVE_SPEED * delta * moveData.distance;
                 model.translateZ(-speed);
