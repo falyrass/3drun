@@ -77,6 +77,7 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { initMap } from './map.js';
         import { MultiplayerClient } from './client.js';
+        import { WebRTCAudioManager } from './webrtc-audio.js';
 
         let scene, camera, renderer, mixer, clock, model, controls;
         let walkAction, idleAction;
@@ -87,6 +88,7 @@
         let playerPseudo = '';
         let localStream = null;
         let peerConnections = {};
+        let webrtcAudioManager = null;
 
         // Elements UI
         const elX = document.getElementById('val-x');
@@ -256,9 +258,32 @@
                 multiplayerClient = new MultiplayerClient('http://localhost:3000');
                 await multiplayerClient.connect(playerPseudo);
                 
+                // Initialiser le gestionnaire WebRTC audio
+                if (localStream && multiplayerClient.socket) {
+                    webrtcAudioManager = new WebRTCAudioManager(multiplayerClient.socket, localStream);
+                    console.log('[✓] WebRTC Audio Manager initialisé');
+                    
+                    // Callback quand on reçoit un stream audio distant
+                    webrtcAudioManager.onRemoteStream = (peerId, remoteStream) => {
+                        console.log(`[🔊] Connexion audio établie avec ${peerId}`);
+                        playRemoteAudio(remoteStream);
+                    };
+                    
+                    webrtcAudioManager.onRemoteStreamRemoved = (peerId) => {
+                        console.log(`[🔌] Flux audio fermé pour ${peerId}`);
+                    };
+                }
+                
                 multiplayerClient.onPlayerJoined = (player) => {
                     console.log('Nouvel joueur:', player.pseudo);
                     createOtherPlayerMesh(player.id, player.pseudo);
+                    
+                    // Créer une connexion audio avec le nouveau joueur
+                    if (webrtcAudioManager) {
+                        setTimeout(() => {
+                            webrtcAudioManager.callPeer(player.id);
+                        }, 500);
+                    }
                 };
                 
                 multiplayerClient.onPlayerUpdate = (data) => {
@@ -268,6 +293,11 @@
                 multiplayerClient.onPlayerDisconnected = (playerId) => {
                     console.log('Joueur déconnecté:', playerId);
                     removeOtherPlayerMesh(playerId);
+                    
+                    // Fermer la connexion audio
+                    if (webrtcAudioManager) {
+                        webrtcAudioManager.closePeerConnection(playerId);
+                    }
                 };
                 
                 console.log('[✓] Multijoueur initialisé');
@@ -275,6 +305,16 @@
                 console.error('[✗] Erreur multijoueur:', error);
                 // Continuer même si serveur non disponible
             }
+        }
+
+        function playRemoteAudio(remoteStream) {
+            // Créer un élément audio caché pour jouer le stream distant
+            const audio = document.createElement('audio');
+            audio.srcObject = remoteStream;
+            audio.autoplay = true;
+            audio.playsinline = true;
+            audio.style.display = 'none';
+            document.body.appendChild(audio);
         }
 
         function createOtherPlayerMesh(playerId, pseudo = 'Joueur') {
@@ -357,10 +397,23 @@
         async function initAudio() {
             try {
                 audioIndicator.innerText = 'Demande d\'accès...';
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                
+                // Configuration audio optimisée pour clarté avec peu de bande passante
+                const constraints = {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: false,
+                        channelCount: 1, // Mono pour économiser la bande
+                        sampleRate: 16000, // 16 kHz suffisant pour la parole
+                        sampleSize: 16
+                    }
+                };
+                
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
                 audioIndicator.innerText = '🎙️ Actif';
                 audioIndicator.style.color = '#00ff00';
-                console.log('[✓] Microphone autorisé');
+                console.log('[✓] Microphone autorisé avec optimisations audio');
             } catch (error) {
                 console.error('[✗] Erreur audio:', error);
                 audioIndicator.innerText = '❌ Refusé';

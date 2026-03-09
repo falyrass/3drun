@@ -47,6 +47,9 @@ io.on('connection', (socket) => {
       rotation: 0
     });
     
+    // Signal WebRTC: notifier les autres joueurs de créer une connexion audio
+    socket.broadcast.emit('newPlayerJoined', socket.id);
+    
     console.log(`[🎮] Joueur "${data.pseudo}" rejoint (${socket.id})`);
   });
 
