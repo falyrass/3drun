@@ -97,12 +97,32 @@
         let multiplayerClient = null;
         let otherPlayerMeshes = {}; // { playerId: { mesh, mixer, idleAction, walkAction } }
         let playerPseudo = '';
+        let playerColor = 0xFFFFFF; // Couleur du joueur
         let localStream = null;
         let peerConnections = {};
         let webrtcAudioManager = null;
         let gltfSoldierModel = null; // Modèle chargé une seule fois pour le cloner
         let connectedPlayers = {}; // { playerId: pseudo }
+        let playerColors = {}; // { playerId: colorHex }
         let pendingPlayers = []; // Queue de joueurs en attente de création du mesh
+        let otherPlayerLabels = {}; // { playerId: div HTML label 2D }
+        
+        // Palette de couleurs pour les joueurs (10+ couleurs vibrantes et distinctes)
+        const COLOR_PALETTE = [
+            0xFF0000, // Rouge vif
+            0x0000FF, // Bleu vif
+            0xFFFF00, // Jaune vif
+            0xFF00FF, // Magenta
+            0x00FFFF, // Cyan
+            0xFF8800, // Orange
+            0x00FF00, // Vert vif
+            0xFF0088, // Rose
+            0x88FF00, // Vert-jaune
+            0x0088FF, // Bleu ciel
+            0xFF6600, // Orange-rouge
+            0x00FF88  // Vert-cyan
+        ];
+        let usedColors = []; // Couleurs déjà assignées
 
         // Elements UI
         const modalPseudo = document.getElementById('modal-pseudo');
@@ -113,7 +133,42 @@
         const playerCount = document.getElementById('player-count');
         const playerList = document.getElementById('player-list');
 
-        const MOVE_SPEED = 5.0; 
+        const MOVE_SPEED = 5.0;
+        const MAP_SIZE = 100; // Taille de la map
+        const SPAWN_SAFE_RADIUS = 10; // Rayon sécurisé autour du point 0
+        
+        function getRandomSpawnPosition() {
+            // Générer une position aléatoire dans la map, mais pas trop proche du centre
+            let x, z, distance;
+            do {
+                x = (Math.random() - 0.5) * MAP_SIZE;
+                z = (Math.random() - 0.5) * MAP_SIZE;
+                distance = Math.sqrt(x * x + z * z);
+            } while (distance < SPAWN_SAFE_RADIUS);
+            return { x, z };
+        }
+        
+        function getAvailableColor() {
+            // Trouver une couleur non utilisée
+            for (const color of COLOR_PALETTE) {
+                if (!usedColors.includes(color)) {
+                    usedColors.push(color);
+                    return color;
+                }
+            }
+            // Fallback : couleur aléatoire
+            return Math.floor(Math.random() * 16777215);
+        }
+        
+        function colorizeModel(modelScene, colorHex) {
+            modelScene.traverse(child => {
+                if (child.isMesh && child.material) {
+                    if (child.material.color) {
+                        child.material.color.setHex(colorHex);
+                    }
+                }
+            });
+        }
 
         // Afficher le modal au lancement
         showPseudoModal();
@@ -184,8 +239,10 @@
                 gltfSoldierModel = gltf; // Stocker pour cloner les autres joueurs
                 
                 model = gltf.scene;
-                model.position.set(2, 0, 2); 
+                const spawnPos = getRandomSpawnPosition();
+                model.position.set(spawnPos.x, 0, spawnPos.z);
                 scene.add(model);
+                colorizeModel(model, playerColor); // Appliquer la couleur au joueur
                 model.traverse(o => { if (o.isMesh) o.castShadow = true; });
 
                 mixer = new THREE.AnimationMixer(model);
@@ -198,6 +255,11 @@
                 
                 // Traiter les joueurs en attente
                 processPendingPlayers();
+                
+                // Envoyer la position initiale au serveur
+                if (multiplayerClient) {
+                    multiplayerClient.sendPlayerUpdate(model.position, model.rotation.y, 'idle');
+                }
                 
                 document.getElementById('loader').style.display = 'none';
                 initJoystick();
@@ -277,8 +339,9 @@
                 multiplayerClient.onPlayerJoined = (player) => {
                     console.log('Joueur rejoint/existant:', player.pseudo);
                     connectedPlayers[player.id] = player.pseudo;
+                    playerColors[player.id] = player.color || 0xFFFFFF; // Récupérer la couleur du joueur
                     updatePlayersList();
-                    createOtherPlayerMesh(player.id, player.pseudo);
+                    createOtherPlayerMesh(player.id, player.pseudo, playerColors[player.id]);
                     
                     if (webrtcAudioManager) {
                         setTimeout(() => {
@@ -303,10 +366,11 @@
                     }
                 };
                 
-                await multiplayerClient.connect(playerPseudo);
+                await multiplayerClient.connect(playerPseudo, playerColor);
                 
                 // Ajouter le joueur lui-même à la liste
                 connectedPlayers[multiplayerClient.playerId] = playerPseudo;
+                playerColors[multiplayerClient.playerId] = playerColor;
                 updatePlayersList();
                 
                 // Initialiser le gestionnaire WebRTC audio
@@ -340,17 +404,18 @@
             document.body.appendChild(audio);
         }
 
-        function createOtherPlayerMesh(playerId, pseudo = 'Joueur') {
+        function createOtherPlayerMesh(playerId, pseudo = 'Joueur', color = 0xFFFFFF) {
             // Si le modèle n'a pas encore été chargé, ajouter à la queue
             if (!gltfSoldierModel) {
                 console.log(`[⏳] Modèle en cours de chargement pour ${pseudo}, ajout à la queue`);
-                pendingPlayers.push({ playerId, pseudo });
+                pendingPlayers.push({ playerId, pseudo, color });
                 return;
             }
             
             // Cloner le modèle du soldat (SkeletonUtils requis pour les SkinnedMesh)
             const clonedScene = SkeletonUtils.clone(gltfSoldierModel.scene);
             clonedScene.position.set(0, 0, 0);
+            colorizeModel(clonedScene, color); // Appliquer la couleur
             clonedScene.traverse(o => { if (o.isMesh) o.castShadow = true; });
             scene.add(clonedScene);
             
@@ -363,24 +428,8 @@
             walkClone.play();
             walkClone.setEffectiveWeight(0);
             
-            // Créer une étiquette avec le pseudo
-            const canvas = document.createElement('canvas');
-            canvas.width = 256;
-            canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#00ff00';
-            ctx.font = 'Bold 40px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(pseudo, canvas.width / 2, canvas.height / 2 + 12);
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            const labelGeometry = new THREE.PlaneGeometry(3, 0.75);
-            const labelMaterial = new THREE.MeshBasicMaterial({ map: texture });
-            const label = new THREE.Mesh(labelGeometry, labelMaterial);
-            label.position.y = 2.5;
-            clonedScene.add(label);
+            // Créer le label HTML 2D avec la couleur du joueur
+            createPlayerLabel2D(playerId, pseudo, color);
             
             otherPlayerMeshes[playerId] = {
                 mesh: clonedScene,
@@ -397,8 +446,8 @@
         function processPendingPlayers() {
             console.log(`[🔄] Traitement de ${pendingPlayers.length} joueurs en attente`);
             while (pendingPlayers.length > 0) {
-                const { playerId, pseudo } = pendingPlayers.shift();
-                createOtherPlayerMesh(playerId, pseudo);
+                const { playerId, pseudo, color } = pendingPlayers.shift();
+                createOtherPlayerMesh(playerId, pseudo, color);
             }
         }
 
@@ -425,6 +474,56 @@
             if (otherPlayerMeshes[playerId]) {
                 scene.remove(otherPlayerMeshes[playerId].mesh);
                 delete otherPlayerMeshes[playerId];
+            }
+            if (otherPlayerLabels[playerId]) {
+                otherPlayerLabels[playerId].remove();
+                delete otherPlayerLabels[playerId];
+            }
+        }
+
+        function createPlayerLabel2D(playerId, pseudo, color = 0xFFFFFF) {
+            const label = document.createElement('div');
+            label.id = `label-${playerId}`;
+            const colorHex = '#' + color.toString(16).padStart(6, '0');
+            label.style.cssText = `
+                position: absolute;
+                color: ${colorHex};
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                font-size: 14px;
+                text-shadow: 0 0 4px #000, 2px 2px 4px #000;
+                white-space: nowrap;
+                pointer-events: none;
+                z-index: 10;
+                transform: translateX(-50%);
+            `;
+            label.textContent = pseudo;
+            document.body.appendChild(label);
+            otherPlayerLabels[playerId] = label;
+        }
+
+        function updatePlayerLabels2D() {
+            for (const [playerId, labelDiv] of Object.entries(otherPlayerLabels)) {
+                const playerData = otherPlayerMeshes[playerId];
+                if (playerData) {
+                    // Projeter la position 3D en coordonnées écran
+                    const worldPos = playerData.mesh.position.clone();
+                    worldPos.y += 2.8; // Au-dessus du personnage
+                    const screenPos = worldPos.project(camera);
+                    
+                    const x = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
+                    
+                    labelDiv.style.left = `${x}px`;
+                    labelDiv.style.top = `${y}px`;
+                    
+                    // Cacher le label si hors écran
+                    if (screenPos.z < 0 || screenPos.x < -1 || screenPos.x > 1 || screenPos.y < -1 || screenPos.y > 1) {
+                        labelDiv.style.display = 'none';
+                    } else {
+                        labelDiv.style.display = 'block';
+                    }
+                }
             }
         }
 
@@ -463,6 +562,7 @@
             
             btnStart.onclick = async () => {
                 playerPseudo = inputPseudo.value.trim() || 'Joueur' + Math.floor(Math.random() * 1000);
+                playerColor = getAvailableColor(); // Assigner une couleur
                 modalPseudo.style.display = 'none';
                 
                 await initAudio();
@@ -511,6 +611,7 @@
             
             updateMovement(delta);
             updateBeacon(elapsedTime);
+            updatePlayerLabels2D();
             controls.update();
             renderer.render(scene, camera);
         }

@@ -26,23 +26,26 @@ io.on('connection', (socket) => {
   // Envoyer la liste des joueurs existants au nouveau joueur
   socket.emit('playersExist', players);
   
-  // Event: Définir les informations du joueur (pseudo, etc.)
+  // Event: Définir les informations du joueur (pseudo, couleur, etc.)
   socket.on('setPlayerInfo', (data) => {
     if (players[socket.id]) {
       players[socket.id].pseudo = data.pseudo;
+      players[socket.id].color = data.color;
     } else {
       players[socket.id] = {
         id: socket.id,
         pseudo: data.pseudo,
+        color: data.color,
         position: { x: 0, y: 0, z: 0 },
         rotation: 0
       };
     }
     
-    // Notifier les autres qu'un nouveau joueur a rejoint avec son pseudo
+    // Notifier les autres qu'un nouveau joueur a rejoint avec son pseudo et sa couleur
     socket.broadcast.emit('playerJoined', {
       id: socket.id,
       pseudo: data.pseudo,
+      color: data.color,
       position: { x: 0, y: 0, z: 0 },
       rotation: 0
     });
