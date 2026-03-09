@@ -61,11 +61,15 @@
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { initMap } from './map.js';
+        import { MultiplayerClient } from './client.js';
 
         let scene, camera, renderer, mixer, clock, model, controls;
         let walkAction, idleAction;
         let moveData = { active: false, angle: 0, distance: 0 };
         let beaconLight, beaconMesh;
+        let multiplayerClient = null;
+        let otherPlayerMeshes = {}; // { playerId: mesh }
 
         // Elements UI
         const elX = document.getElementById('val-x');
@@ -129,6 +133,12 @@
             grid.position.y = 0.01;
             groundGroup.add(grid);
             scene.add(groundGroup);
+
+            // Charger la carte
+            initMap(scene, THREE);
+
+            // Initialiser le multijoueur
+            initMultiplayer();
 
             const loader = new GLTFLoader();
             loader.load('https://threejs.org/examples/models/gltf/Soldier.glb', (gltf) => {
@@ -198,6 +208,15 @@
             // MISE À JOUR UI
             elX.innerText = model.position.x.toFixed(2);
             elZ.innerText = model.position.z.toFixed(2);
+
+            // Envoyer la position au serveur multijoueur
+            if (multiplayerClient) {
+                multiplayerClient.sendPlayerUpdate(
+                    model.position,
+                    model.rotation.y,
+                    moveData.active ? 'walk' : 'idle'
+                );
+            }
         }
 
         function updateBeacon(elapsedTime) {
@@ -206,6 +225,65 @@
                 beaconLight.intensity = intensity;
                 const scale = Math.sin(elapsedTime * 4) * 0.05 + 1.0;
                 beaconMesh.scale.set(scale, scale, scale);
+            }
+        }
+
+        async function initMultiplayer() {
+            try {
+                multiplayerClient = new MultiplayerClient('http://localhost:3000');
+                await multiplayerClient.connect();
+                
+                multiplayerClient.onPlayerJoined = (player) => {
+                    console.log('Nouvel joueur:', player.id);
+                    createOtherPlayerMesh(player.id);
+                };
+                
+                multiplayerClient.onPlayerUpdate = (data) => {
+                    updateOtherPlayerMesh(data.id, data.position, data.rotation);
+                };
+                
+                multiplayerClient.onPlayerDisconnected = (playerId) => {
+                    console.log('Joueur déconnecté:', playerId);
+                    removeOtherPlayerMesh(playerId);
+                };
+                
+                console.log('[✓] Multijoueur initialisé');
+            } catch (error) {
+                console.error('[✗] Erreur multijoueur:', error);
+                // Continuer même si serveur non disponible
+            }
+        }
+
+        function createOtherPlayerMesh(playerId) {
+            // Créer une sphère simple pour représenter l'autre joueur
+            const geometry = new THREE.CylinderGeometry(0.7, 0.7, 1.8, 8);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: Math.random() * 0xffffff 
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(0, 0.9, 0);
+            mesh.castShadow = true;
+            scene.add(mesh);
+            
+            otherPlayerMeshes[playerId] = {
+                mesh: mesh,
+                position: new THREE.Vector3(0, 0, 0),
+                rotation: 0
+            };
+        }
+
+        function updateOtherPlayerMesh(playerId, position, rotation) {
+            if (otherPlayerMeshes[playerId]) {
+                otherPlayerMeshes[playerId].mesh.position.copy(position);
+                otherPlayerMeshes[playerId].mesh.position.y += 0.9;
+                otherPlayerMeshes[playerId].mesh.rotation.y = rotation;
+            }
+        }
+
+        function removeOtherPlayerMesh(playerId) {
+            if (otherPlayerMeshes[playerId]) {
+                scene.remove(otherPlayerMeshes[playerId].mesh);
+                delete otherPlayerMeshes[playerId];
             }
         }
 
