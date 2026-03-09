@@ -82,13 +82,17 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
 
     <script type="module">
+        // Forcer le rechargement en cas de mise à jour
+        const VERSION = '20260309-001';
+        console.log(`[📦] Version: ${VERSION}`);
+        
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-        import { initMap } from './map.js?v=20260309';
-        import { MultiplayerClient } from './client.js?v=20260309';
-        import { WebRTCAudioManager } from './webrtc-audio.js?v=20260309';
+        import { initMap } from './map.js?v=20260309-001';
+        import { MultiplayerClient } from './client.js?v=20260309-001';
+        import { WebRTCAudioManager } from './webrtc-audio.js?v=20260309-001';
 
         let scene, camera, renderer, mixer, clock, model, controls;
         let walkAction, idleAction;
