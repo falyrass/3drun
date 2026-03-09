@@ -101,6 +101,7 @@
         let webrtcAudioManager = null;
         let gltfSoldierModel = null; // Modèle chargé une seule fois pour le cloner
         let connectedPlayers = {}; // { playerId: pseudo }
+        let pendingPlayers = []; // Queue de joueurs en attente de création du mesh
 
         // Elements UI
         const modalPseudo = document.getElementById('modal-pseudo');
@@ -116,7 +117,7 @@
         // Afficher le modal au lancement
         showPseudoModal();
 
-        function init() {
+        async function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x1a1a1a);
             scene.fog = new THREE.Fog(0x1a1a1a, 5, 45);
@@ -174,8 +175,8 @@
             // Charger la carte
             initMap(scene, THREE);
 
-            // Initialiser le multijoueur
-            initMultiplayer();
+            // Initialiser le multijoueur AVANT de charger le modèle
+            await initMultiplayer();
 
             const loader = new GLTFLoader();
             loader.load('https://threejs.org/examples/models/gltf/Soldier.glb', (gltf) => {
@@ -193,6 +194,9 @@
                 idleAction.play();
                 walkAction.play();
                 walkAction.setEffectiveWeight(0);
+                
+                // Traiter les joueurs en attente
+                processPendingPlayers();
                 
                 document.getElementById('loader').style.display = 'none';
                 initJoystick();
@@ -338,9 +342,10 @@
         }
 
         function createOtherPlayerMesh(playerId, pseudo = 'Joueur') {
-            // Si le modèle n'a pas encore été chargé, attendre
+            // Si le modèle n'a pas encore été chargé, ajouter à la queue
             if (!gltfSoldierModel) {
-                console.warn(`[!] Modèle Soldier pas encore chargé pour ${pseudo}`);
+                console.log(`[⏳] Modèle en cours de chargement pour ${pseudo}, ajout à la queue`);
+                pendingPlayers.push({ playerId, pseudo });
                 return;
             }
             
@@ -388,6 +393,14 @@
             };
             
             console.log(`[✓] Joueur ${pseudo} créé avec le modèle Soldier`);
+        }
+
+        function processPendingPlayers() {
+            console.log(`[🔄] Traitement de ${pendingPlayers.length} joueurs en attente`);
+            while (pendingPlayers.length > 0) {
+                const { playerId, pseudo } = pendingPlayers.shift();
+                createOtherPlayerMesh(playerId, pseudo);
+            }
         }
 
         function updateOtherPlayerMesh(playerId, position, rotation) {
@@ -449,12 +462,12 @@
             modalPseudo.style.display = 'flex';
             inputPseudo.focus();
             
-            btnStart.onclick = () => {
+            btnStart.onclick = async () => {
                 playerPseudo = inputPseudo.value.trim() || 'Joueur' + Math.floor(Math.random() * 1000);
                 modalPseudo.style.display = 'none';
                 
-                initAudio();
-                init();
+                await initAudio();
+                await init();
             };
             
             inputPseudo.onkeypress = (e) => {
