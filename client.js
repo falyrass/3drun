@@ -1,9 +1,9 @@
 // client.js - Client Socket.io pour 3D Run Multijoueur
 
 export class MultiplayerClient {
-  constructor(serverUrl = window.location.origin || 'http://localhost:8080') {
+  constructor(serverUrl = '') {
     this.socket = null;
-    this.serverUrl = serverUrl;
+    this.serverUrl = serverUrl || window.location.origin || 'http://localhost:8080';
     this.playerId = null;
     this.playerPseudo = '';
     this.otherPlayers = {}; // { playerId: { position, rotation, mesh, pseudo } }
