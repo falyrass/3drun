@@ -1,9 +1,9 @@
 // client.js - Client Socket.io pour 3D Run Multijoueur
 
 export class MultiplayerClient {
-  constructor(serverUrl = '') {
+  constructor() {
     this.socket = null;
-    this.serverUrl = serverUrl || window.location.origin || 'http://localhost:8080';
+    this.serverUrl = null;
     this.playerId = null;
     this.playerPseudo = '';
     this.otherPlayers = {}; // { playerId: { position, rotation, mesh, pseudo } }
@@ -15,11 +15,21 @@ export class MultiplayerClient {
   connect(pseudo = 'Joueur', color = 0xFFFFFF) {
     return new Promise((resolve, reject) => {
       try {
+        // Déterminer l'URL du serveur au moment de la connexion
+        this.serverUrl = window.location.origin || 'http://localhost:8080';
+        console.log(`[🔗] Tentative de connexion à: ${this.serverUrl}`);
+        
         // Charger Socket.io depuis CDN
         const script = document.createElement('script');
         script.src = 'https://cdn.socket.io/4.5.4/socket.io.min.js';
         script.onload = () => {
-          this.socket = io(this.serverUrl);
+          // Se connecter à l'origine actuelle du navigateur (évite les hardcodes)
+          this.socket = io(this.serverUrl, {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5
+          });
           this.playerColor = color;
           this.playerPseudo = pseudo;
           this.setupListeners();
