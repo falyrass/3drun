@@ -244,10 +244,6 @@
                 controls.target.copy(model.position).add(new THREE.Vector3(0, 1.5, 0));
             }
 
-            // MISE À JOUR UI
-            elX.innerText = model.position.x.toFixed(2);
-            elZ.innerText = model.position.z.toFixed(2);
-
             // Envoyer la position au serveur multijoueur
             if (multiplayerClient) {
                 multiplayerClient.sendPlayerUpdate(
