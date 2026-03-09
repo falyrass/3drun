@@ -38,12 +38,25 @@
 </head>
 <body>
     <div id="portrait-warning">Veuillez tourner votre appareil en mode Paysage 🔄</div>
-    <div id="ui-coords">
-        <strong>POSITION DU PERSO</strong><br>
-        X: <span id="val-x">0.00</span><br>
-        Z: <span id="val-z">0.00</span><br>
-        <strong style="color: #ffff00;">Pseudo: <span id="pseudo-display">???</span></strong><br>
-        <small style="color: #00aaff;">Centre (Boule): 0, 0</small>
+    <div id="ui-status" style="position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #00ff00; padding: 15px; border-radius: 8px; border: 1px solid #00ff00; font-size: 12px; pointer-events: none; z-index: 20; min-width: 180px;">
+        <div style="margin-bottom: 12px; color: #00ff00; border-bottom: 1px solid #00ff00; padding-bottom: 8px;">
+            <strong>STATUS</strong>
+        </div>
+        <div style="margin-bottom: 8px;">
+            <span id="audio-status-text">🎙️ Micro: ?</span>
+        </div>
+        <div style="margin-bottom: 8px;">
+            <span id="headset-status-text">🎧 Casque: ?</span>
+        </div>
+        <div style="margin-bottom: 12px; border-bottom: 1px solid #00ff00; padding-bottom: 8px;">
+            <strong>Joueurs: <span id="player-count">0</span>/10</strong>
+        </div>
+        <div style="font-size: 12px;">
+            <strong>Connectés:</strong><br>
+            <div id="player-list" style="margin-top: 5px; max-height: 150px; overflow-y: auto; font-size: 11px;">
+                <span style="color: #888;">-- En attente --</span>
+            </div>
+        </div>
     </div>
     
     <div id="modal-pseudo" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 999; display: flex; justify-content: center; align-items: center;">
@@ -55,9 +68,6 @@
         </div>
     </div>
     
-    <div id="audio-status" style="position: absolute; top: 20px; right: 20px; padding: 10px; background: rgba(0,0,0,0.7); color: #00ff00; border-radius: 5px; font-size: 12px; z-index: 10;">
-        🎙️ Audio: <span id="audio-indicator">Initialisation...</span>
-    </div>
     <div id="loader">Chargement...</div>
     <div id="joystick-zone"></div>
 
@@ -84,20 +94,22 @@
         let moveData = { active: false, angle: 0, distance: 0 };
         let beaconLight, beaconMesh;
         let multiplayerClient = null;
-        let otherPlayerMeshes = {}; // { playerId: mesh }
+        let otherPlayerMeshes = {}; // { playerId: { mesh, mixer, idleAction, walkAction } }
         let playerPseudo = '';
         let localStream = null;
         let peerConnections = {};
         let webrtcAudioManager = null;
+        let gltfSoldierModel = null; // Modèle chargé une seule fois pour le cloner
+        let connectedPlayers = {}; // { playerId: pseudo }
 
         // Elements UI
-        const elX = document.getElementById('val-x');
-        const elZ = document.getElementById('val-z');
-        const pseudoDisplay = document.getElementById('pseudo-display');
         const modalPseudo = document.getElementById('modal-pseudo');
         const inputPseudo = document.getElementById('input-pseudo');
         const btnStart = document.getElementById('btn-start');
-        const audioIndicator = document.getElementById('audio-indicator');
+        const audioStatusText = document.getElementById('audio-status-text');
+        const headsetStatusText = document.getElementById('headset-status-text');
+        const playerCount = document.getElementById('player-count');
+        const playerList = document.getElementById('player-list');
 
         const MOVE_SPEED = 5.0; 
 
@@ -167,6 +179,8 @@
 
             const loader = new GLTFLoader();
             loader.load('https://threejs.org/examples/models/gltf/Soldier.glb', (gltf) => {
+                gltfSoldierModel = gltf; // Stocker pour cloner les autres joueurs
+                
                 model = gltf.scene;
                 model.position.set(2, 0, 2); 
                 scene.add(model);
@@ -258,6 +272,11 @@
                 multiplayerClient = new MultiplayerClient('http://localhost:3000');
                 await multiplayerClient.connect(playerPseudo);
                 
+                // Ajouter le joueur lui-même à la liste avec l'ID du socket
+                const myPlayerId = multiplayerClient.playerId;
+                connectedPlayers[myPlayerId] = playerPseudo;
+                updatePlayersList();
+                
                 // Initialiser le gestionnaire WebRTC audio
                 if (localStream && multiplayerClient.socket) {
                     webrtcAudioManager = new WebRTCAudioManager(multiplayerClient.socket, localStream);
@@ -276,6 +295,8 @@
                 
                 multiplayerClient.onPlayerJoined = (player) => {
                     console.log('Nouvel joueur:', player.pseudo);
+                    connectedPlayers[player.id] = player.pseudo;
+                    updatePlayersList();
                     createOtherPlayerMesh(player.id, player.pseudo);
                     
                     // Créer une connexion audio avec le nouveau joueur
@@ -288,10 +309,13 @@
                 
                 multiplayerClient.onPlayerUpdate = (data) => {
                     updateOtherPlayerMesh(data.id, data.position, data.rotation);
+                    // Mettre à jour l'animation en fonction du mouvement (à implémenter côté serveur)
                 };
                 
                 multiplayerClient.onPlayerDisconnected = (playerId) => {
                     console.log('Joueur déconnecté:', playerId);
+                    delete connectedPlayers[playerId];
+                    updatePlayersList();
                     removeOtherPlayerMesh(playerId);
                     
                     // Fermer la connexion audio
@@ -318,15 +342,26 @@
         }
 
         function createOtherPlayerMesh(playerId, pseudo = 'Joueur') {
-            // Créer une sphère simple pour représenter l'autre joueur
-            const geometry = new THREE.CylinderGeometry(0.7, 0.7, 1.8, 8);
-            const material = new THREE.MeshStandardMaterial({ 
-                color: Math.random() * 0xffffff 
-            });
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.position.set(0, 0.9, 0);
-            mesh.castShadow = true;
-            scene.add(mesh);
+            // Si le modèle n'a pas encore été chargé, attendre
+            if (!gltfSoldierModel) {
+                console.warn(`[!] Modèle Soldier pas encore chargé pour ${pseudo}`);
+                return;
+            }
+            
+            // Cloner le modèle du soldat
+            const clonedScene = gltfSoldierModel.scene.clone();
+            clonedScene.position.set(0, 0, 0);
+            clonedScene.traverse(o => { if (o.isMesh) o.castShadow = true; });
+            scene.add(clonedScene);
+            
+            // Créer un mixer pour les animations
+            const cloneMixer = new THREE.AnimationMixer(clonedScene);
+            const idleClone = cloneMixer.clipAction(gltfSoldierModel.animations[0]);
+            const walkClone = cloneMixer.clipAction(gltfSoldierModel.animations[1]);
+            
+            idleClone.play();
+            walkClone.play();
+            walkClone.setEffectiveWeight(0);
             
             // Créer une étiquette avec le pseudo
             const canvas = document.createElement('canvas');
@@ -345,21 +380,36 @@
             const labelMaterial = new THREE.MeshBasicMaterial({ map: texture });
             const label = new THREE.Mesh(labelGeometry, labelMaterial);
             label.position.y = 2.5;
-            mesh.add(label);
+            clonedScene.add(label);
             
             otherPlayerMeshes[playerId] = {
-                mesh: mesh,
-                position: new THREE.Vector3(0, 0, 0),
-                rotation: 0,
-                pseudo: pseudo
+                mesh: clonedScene,
+                mixer: cloneMixer,
+                idleAction: idleClone,
+                walkAction: walkClone,
+                pseudo: pseudo,
+                isMoving: false
             };
+            
+            console.log(`[✓] Joueur ${pseudo} créé avec le modèle Soldier`);
         }
 
         function updateOtherPlayerMesh(playerId, position, rotation) {
             if (otherPlayerMeshes[playerId]) {
-                otherPlayerMeshes[playerId].mesh.position.copy(position);
-                otherPlayerMeshes[playerId].mesh.position.y += 0.9;
-                otherPlayerMeshes[playerId].mesh.rotation.y = rotation;
+                const player = otherPlayerMeshes[playerId];
+                player.mesh.position.copy(position);
+                player.mesh.position.y += 0; // Ajustement de hauteur si nécessaire
+                player.mesh.rotation.y = rotation;
+            }
+        }
+
+        function updateOtherPlayerAnimation(playerId, isMoving) {
+            if (otherPlayerMeshes[playerId]) {
+                const player = otherPlayerMeshes[playerId];
+                const weight = isMoving ? 1 : 0;
+                player.walkAction.setEffectiveWeight(weight);
+                player.idleAction.setEffectiveWeight(1 - weight);
+                player.isMoving = isMoving;
             }
         }
 
@@ -368,6 +418,29 @@
                 scene.remove(otherPlayerMeshes[playerId].mesh);
                 delete otherPlayerMeshes[playerId];
             }
+        }
+
+        function updatePlayersList() {
+            playerCount.textContent = Object.keys(connectedPlayers).length;
+            
+            if (Object.keys(connectedPlayers).length === 0) {
+                playerList.innerHTML = '<span style="color: #888;">-- En attente --</span>';
+                return;
+            }
+            
+            let html = '';
+            for (const [playerId, pseudo] of Object.entries(connectedPlayers)) {
+                html += `<div style="padding: 3px; color: #00ff00;">✓ ${pseudo}</div>`;
+            }
+            playerList.innerHTML = html;
+        }
+
+        function updateAudioStatus(hasMic, hasHeadset) {
+            audioStatusText.textContent = hasMic ? '✓ 🎙️ Micro: ON' : '✗ 🎙️ Micro: OFF';
+            audioStatusText.style.color = hasMic ? '#00ff00' : '#ff6600';
+            
+            headsetStatusText.textContent = hasHeadset ? '✓ 🎧 Casque: ON' : '✗ 🎧 Casque: OFF';
+            headsetStatusText.style.color = hasHeadset ? '#00ff00' : '#ff6600';
         }
 
         function onWindowResize() {
@@ -382,7 +455,6 @@
             
             btnStart.onclick = () => {
                 playerPseudo = inputPseudo.value.trim() || 'Joueur' + Math.floor(Math.random() * 1000);
-                pseudoDisplay.innerText = playerPseudo;
                 modalPseudo.style.display = 'none';
                 
                 initAudio();
@@ -396,8 +468,6 @@
 
         async function initAudio() {
             try {
-                audioIndicator.innerText = 'Demande d\'accès...';
-                
                 // Configuration audio optimisée pour clarté avec peu de bande passante
                 const constraints = {
                     audio: {
@@ -411,13 +481,11 @@
                 };
                 
                 localStream = await navigator.mediaDevices.getUserMedia(constraints);
-                audioIndicator.innerText = '🎙️ Actif';
-                audioIndicator.style.color = '#00ff00';
+                updateAudioStatus(true, true); // Micro et casque ON
                 console.log('[✓] Microphone autorisé avec optimisations audio');
             } catch (error) {
                 console.error('[✗] Erreur audio:', error);
-                audioIndicator.innerText = '❌ Refusé';
-                audioIndicator.style.color = '#ff0000';
+                updateAudioStatus(false, false);
             }
         }
 
@@ -427,6 +495,12 @@
             const elapsedTime = clock.getElapsedTime(); 
             
             if (mixer) mixer.update(delta);
+            
+            // Mettre à jour les animations des autres joueurs
+            Object.values(otherPlayerMeshes).forEach(player => {
+                if (player.mixer) player.mixer.update(delta);
+            });
+            
             updateMovement(delta);
             updateBeacon(elapsedTime);
             controls.update();
