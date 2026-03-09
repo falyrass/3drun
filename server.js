@@ -14,6 +14,17 @@ const io = socketIo(server, {
 });
 
 app.use(cors());
+
+// Désactiver le cache pour les fichiers HTML et JS en développement
+app.use((req, res, next) => {
+  if (req.path.endsWith('.js') || req.path.endsWith('.html') || req.path.endsWith('.css')) {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+  }
+  next();
+});
+
 app.use(express.static('.'));
 
 // Stockage des joueurs connectés
