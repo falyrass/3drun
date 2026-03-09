@@ -26,11 +26,28 @@ io.on('connection', (socket) => {
   // Envoyer la liste des joueurs existants au nouveau joueur
   socket.emit('playersExist', players);
   
-  // Notifier les autres qu'un nouveau joueur a rejoint
-  socket.broadcast.emit('playerJoined', {
-    id: socket.id,
-    position: { x: 0, y: 0, z: 0 },
-    rotation: 0
+  // Event: Définir les informations du joueur (pseudo, etc.)
+  socket.on('setPlayerInfo', (data) => {
+    if (players[socket.id]) {
+      players[socket.id].pseudo = data.pseudo;
+    } else {
+      players[socket.id] = {
+        id: socket.id,
+        pseudo: data.pseudo,
+        position: { x: 0, y: 0, z: 0 },
+        rotation: 0
+      };
+    }
+    
+    // Notifier les autres qu'un nouveau joueur a rejoint avec son pseudo
+    socket.broadcast.emit('playerJoined', {
+      id: socket.id,
+      pseudo: data.pseudo,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: 0
+    });
+    
+    console.log(`[🎮] Joueur "${data.pseudo}" rejoint (${socket.id})`);
   });
 
   // Event: Mouvement du joueur
@@ -58,18 +75,29 @@ io.on('connection', (socket) => {
   socket.on('chat', (message) => {
     io.emit('chat', {
       playerId: socket.id,
+      playerPseudo: players[socket.id]?.pseudo || 'Joueur',
       message: message,
       timestamp: new Date()
+    });
+  });
+
+  // Event: Signal WebRTC (pour audio/vidéo)
+  socket.on('webrtc-signal', (data) => {
+    socket.to(data.to).emit('webrtc-signal', {
+      from: socket.id,
+      signal: data.signal
     });
   });
 
   // Event: Déconnexion
   socket.on('disconnect', () => {
     console.log(`[✗] Joueur déconnecté: ${socket.id}`);
+    const pseudo = players[socket.id]?.pseudo || 'Inconnu';
     delete players[socket.id];
     
     // Notifier les autres de la déconnexion
     io.emit('playerDisconnected', socket.id);
+    console.log(`[📊] ${socket.id} tué (${pseudo})`);
   });
 
   // Garder une connexion active (heartbeat)
@@ -91,7 +119,10 @@ app.get('/health', (req, res) => {
 app.get('/stats', (req, res) => {
   res.json({
     playersOnline: Object.keys(players).length,
-    players: Object.values(players)
+    players: Object.values(players).map(p => ({
+      id: p.id,
+      pseudo: p.pseudo
+    }))
   });
 });
 

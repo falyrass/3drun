@@ -42,7 +42,21 @@
         <strong>POSITION DU PERSO</strong><br>
         X: <span id="val-x">0.00</span><br>
         Z: <span id="val-z">0.00</span><br>
+        <strong style="color: #ffff00;">Pseudo: <span id="pseudo-display">???</span></strong><br>
         <small style="color: #00aaff;">Centre (Boule): 0, 0</small>
+    </div>
+    
+    <div id="modal-pseudo" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 999; display: flex; justify-content: center; align-items: center;">
+        <div style="background: #222; padding: 30px; border-radius: 10px; border: 2px solid #00ff00; color: white; text-align: center; min-width: 300px;">
+            <h2 style="margin-top: 0; color: #00ff00;">BIENVENUE</h2>
+            <p>Entrez votre pseudo pour commencer :</p>
+            <input type="text" id="input-pseudo" placeholder="Votre pseudo..." style="width: 100%; padding: 10px; margin: 10px 0; background: #333; color: white; border: 1px solid #00ff00; border-radius: 5px; font-size: 16px;" maxlength="20">
+            <button id="btn-start" style="width: 100%; padding: 10px; margin-top: 10px; background: #00ff00; color: #000; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 16px;">DÉMARRER</button>
+        </div>
+    </div>
+    
+    <div id="audio-status" style="position: absolute; top: 20px; right: 20px; padding: 10px; background: rgba(0,0,0,0.7); color: #00ff00; border-radius: 5px; font-size: 12px; z-index: 10;">
+        🎙️ Audio: <span id="audio-indicator">Initialisation...</span>
     </div>
     <div id="loader">Chargement...</div>
     <div id="joystick-zone"></div>
@@ -70,14 +84,23 @@
         let beaconLight, beaconMesh;
         let multiplayerClient = null;
         let otherPlayerMeshes = {}; // { playerId: mesh }
+        let playerPseudo = '';
+        let localStream = null;
+        let peerConnections = {};
 
         // Elements UI
         const elX = document.getElementById('val-x');
         const elZ = document.getElementById('val-z');
+        const pseudoDisplay = document.getElementById('pseudo-display');
+        const modalPseudo = document.getElementById('modal-pseudo');
+        const inputPseudo = document.getElementById('input-pseudo');
+        const btnStart = document.getElementById('btn-start');
+        const audioIndicator = document.getElementById('audio-indicator');
 
         const MOVE_SPEED = 5.0; 
 
-        init();
+        // Afficher le modal au lancement
+        showPseudoModal();
 
         function init() {
             scene = new THREE.Scene();
@@ -231,11 +254,11 @@
         async function initMultiplayer() {
             try {
                 multiplayerClient = new MultiplayerClient('http://localhost:3000');
-                await multiplayerClient.connect();
+                await multiplayerClient.connect(playerPseudo);
                 
                 multiplayerClient.onPlayerJoined = (player) => {
-                    console.log('Nouvel joueur:', player.id);
-                    createOtherPlayerMesh(player.id);
+                    console.log('Nouvel joueur:', player.pseudo);
+                    createOtherPlayerMesh(player.id, player.pseudo);
                 };
                 
                 multiplayerClient.onPlayerUpdate = (data) => {
@@ -254,7 +277,7 @@
             }
         }
 
-        function createOtherPlayerMesh(playerId) {
+        function createOtherPlayerMesh(playerId, pseudo = 'Joueur') {
             // Créer une sphère simple pour représenter l'autre joueur
             const geometry = new THREE.CylinderGeometry(0.7, 0.7, 1.8, 8);
             const material = new THREE.MeshStandardMaterial({ 
@@ -265,10 +288,30 @@
             mesh.castShadow = true;
             scene.add(mesh);
             
+            // Créer une étiquette avec le pseudo
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'Bold 40px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(pseudo, canvas.width / 2, canvas.height / 2 + 12);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const labelGeometry = new THREE.PlaneGeometry(3, 0.75);
+            const labelMaterial = new THREE.MeshBasicMaterial({ map: texture });
+            const label = new THREE.Mesh(labelGeometry, labelMaterial);
+            label.position.y = 2.5;
+            mesh.add(label);
+            
             otherPlayerMeshes[playerId] = {
                 mesh: mesh,
                 position: new THREE.Vector3(0, 0, 0),
-                rotation: 0
+                rotation: 0,
+                pseudo: pseudo
             };
         }
 
@@ -291,6 +334,38 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function showPseudoModal() {
+            modalPseudo.style.display = 'flex';
+            inputPseudo.focus();
+            
+            btnStart.onclick = () => {
+                playerPseudo = inputPseudo.value.trim() || 'Joueur' + Math.floor(Math.random() * 1000);
+                pseudoDisplay.innerText = playerPseudo;
+                modalPseudo.style.display = 'none';
+                
+                initAudio();
+                init();
+            };
+            
+            inputPseudo.onkeypress = (e) => {
+                if (e.key === 'Enter') btnStart.click();
+            };
+        }
+
+        async function initAudio() {
+            try {
+                audioIndicator.innerText = 'Demande d\'accès...';
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                audioIndicator.innerText = '🎙️ Actif';
+                audioIndicator.style.color = '#00ff00';
+                console.log('[✓] Microphone autorisé');
+            } catch (error) {
+                console.error('[✗] Erreur audio:', error);
+                audioIndicator.innerText = '❌ Refusé';
+                audioIndicator.style.color = '#ff0000';
+            }
         }
 
         function animate() {

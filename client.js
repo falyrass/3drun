@@ -5,13 +5,14 @@ export class MultiplayerClient {
     this.socket = null;
     this.serverUrl = serverUrl;
     this.playerId = null;
-    this.otherPlayers = {}; // { playerId: { position, rotation, mesh } }
+    this.playerPseudo = '';
+    this.otherPlayers = {}; // { playerId: { position, rotation, mesh, pseudo } }
     this.onPlayerJoined = null;
     this.onPlayerUpdate = null;
     this.onPlayerDisconnected = null;
   }
 
-  connect() {
+  connect(pseudo = 'Joueur') {
     return new Promise((resolve, reject) => {
       try {
         // Charger Socket.io depuis CDN
@@ -19,6 +20,7 @@ export class MultiplayerClient {
         script.src = 'https://cdn.socket.io/4.5.4/socket.io.min.js';
         script.onload = () => {
           this.socket = io(this.serverUrl);
+          this.playerPseudo = pseudo;
           this.setupListeners();
           resolve();
         };
@@ -35,6 +37,11 @@ export class MultiplayerClient {
     this.socket.on('connect', () => {
       this.playerId = this.socket.id;
       console.log(`[✓] Connecté au serveur avec l'ID: ${this.playerId}`);
+      
+      // Envoyer le pseudo au serveur
+      this.socket.emit('setPlayerInfo', {
+        pseudo: this.playerPseudo
+      });
     });
 
     // Joueurs existants
@@ -52,7 +59,7 @@ export class MultiplayerClient {
 
     // Nouveau joueur rejoint
     this.socket.on('playerJoined', (player) => {
-      console.log(`[+] Joueur rejoint: ${player.id}`);
+      console.log(`[+] Joueur rejoint: ${player.pseudo} (${player.id})`);
       this.otherPlayers[player.id] = player;
       if (this.onPlayerJoined) {
         this.onPlayerJoined(player);
