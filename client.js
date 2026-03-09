@@ -22,7 +22,15 @@ export class MultiplayerClient {
           this.socket = io(this.serverUrl);
           this.playerPseudo = pseudo;
           this.setupListeners();
-          resolve();
+          
+          // Attendre que le socket soit vraiment connecté avant de se résoudre
+          this.socket.once('connect', () => {
+            resolve();
+          });
+          
+          this.socket.once('connect_error', (error) => {
+            reject(error);
+          });
         };
         script.onerror = reject;
         document.head.appendChild(script);

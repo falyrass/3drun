@@ -85,6 +85,7 @@
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
         import { initMap } from './map.js';
         import { MultiplayerClient } from './client.js';
         import { WebRTCAudioManager } from './webrtc-audio.js';
@@ -270,11 +271,41 @@
         async function initMultiplayer() {
             try {
                 multiplayerClient = new MultiplayerClient('http://localhost:3000');
+                
+                // IMPORTANT: définir les callbacks AVANT connect() pour éviter la race condition
+                // Le serveur envoie playersExist dès la connexion
+                multiplayerClient.onPlayerJoined = (player) => {
+                    console.log('Joueur rejoint/existant:', player.pseudo);
+                    connectedPlayers[player.id] = player.pseudo;
+                    updatePlayersList();
+                    createOtherPlayerMesh(player.id, player.pseudo);
+                    
+                    if (webrtcAudioManager) {
+                        setTimeout(() => {
+                            webrtcAudioManager.callPeer(player.id);
+                        }, 500);
+                    }
+                };
+                
+                multiplayerClient.onPlayerUpdate = (data) => {
+                    updateOtherPlayerMesh(data.id, data.position, data.rotation);
+                };
+                
+                multiplayerClient.onPlayerDisconnected = (playerId) => {
+                    console.log('Joueur déconnecté:', playerId);
+                    delete connectedPlayers[playerId];
+                    updatePlayersList();
+                    removeOtherPlayerMesh(playerId);
+                    
+                    if (webrtcAudioManager) {
+                        webrtcAudioManager.closePeerConnection(playerId);
+                    }
+                };
+                
                 await multiplayerClient.connect(playerPseudo);
                 
-                // Ajouter le joueur lui-même à la liste avec l'ID du socket
-                const myPlayerId = multiplayerClient.playerId;
-                connectedPlayers[myPlayerId] = playerPseudo;
+                // Ajouter le joueur lui-même à la liste
+                connectedPlayers[multiplayerClient.playerId] = playerPseudo;
                 updatePlayersList();
                 
                 // Initialiser le gestionnaire WebRTC audio
@@ -282,7 +313,6 @@
                     webrtcAudioManager = new WebRTCAudioManager(multiplayerClient.socket, localStream);
                     console.log('[✓] WebRTC Audio Manager initialisé');
                     
-                    // Callback quand on reçoit un stream audio distant
                     webrtcAudioManager.onRemoteStream = (peerId, remoteStream) => {
                         console.log(`[🔊] Connexion audio établie avec ${peerId}`);
                         playRemoteAudio(remoteStream);
@@ -293,41 +323,9 @@
                     };
                 }
                 
-                multiplayerClient.onPlayerJoined = (player) => {
-                    console.log('Nouvel joueur:', player.pseudo);
-                    connectedPlayers[player.id] = player.pseudo;
-                    updatePlayersList();
-                    createOtherPlayerMesh(player.id, player.pseudo);
-                    
-                    // Créer une connexion audio avec le nouveau joueur
-                    if (webrtcAudioManager) {
-                        setTimeout(() => {
-                            webrtcAudioManager.callPeer(player.id);
-                        }, 500);
-                    }
-                };
-                
-                multiplayerClient.onPlayerUpdate = (data) => {
-                    updateOtherPlayerMesh(data.id, data.position, data.rotation);
-                    // Mettre à jour l'animation en fonction du mouvement (à implémenter côté serveur)
-                };
-                
-                multiplayerClient.onPlayerDisconnected = (playerId) => {
-                    console.log('Joueur déconnecté:', playerId);
-                    delete connectedPlayers[playerId];
-                    updatePlayersList();
-                    removeOtherPlayerMesh(playerId);
-                    
-                    // Fermer la connexion audio
-                    if (webrtcAudioManager) {
-                        webrtcAudioManager.closePeerConnection(playerId);
-                    }
-                };
-                
                 console.log('[✓] Multijoueur initialisé');
             } catch (error) {
                 console.error('[✗] Erreur multijoueur:', error);
-                // Continuer même si serveur non disponible
             }
         }
 
@@ -349,8 +347,8 @@
                 return;
             }
             
-            // Cloner le modèle du soldat
-            const clonedScene = gltfSoldierModel.scene.clone();
+            // Cloner le modèle du soldat (SkeletonUtils requis pour les SkinnedMesh)
+            const clonedScene = SkeletonUtils.clone(gltfSoldierModel.scene);
             clonedScene.position.set(0, 0, 0);
             clonedScene.traverse(o => { if (o.isMesh) o.castShadow = true; });
             scene.add(clonedScene);
