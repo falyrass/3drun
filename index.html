@@ -29,7 +29,53 @@
         #joystick-zone {
             position: absolute; bottom: 30px; left: 30px; width: 120px; height: 120px; z-index: 10;
         }
-        
+
+        /* ── Bouton switch Material Design ─────────────────── */
+        .md-switch {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            width: 40px;
+            height: 24px;
+            cursor: pointer;
+            flex-shrink: 0;
+            margin-left: 10px;
+        }
+        .md-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+        .md-switch-track {
+            position: absolute;
+            top: 4px; left: 0;
+            width: 40px;
+            height: 16px;
+            background: #555;
+            border-radius: 8px;
+            transition: background 0.25s ease;
+        }
+        .md-switch-thumb {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #9e9e9e;
+            top: 2px;
+            left: 0px;
+            transition: left 0.25s ease, background 0.25s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+        .md-switch input:checked + .md-switch-track {
+            background: rgba(76,175,80,0.45);
+        }
+        .md-switch input:checked + .md-switch-track .md-switch-thumb {
+            background: #4CAF50;
+            left: 20px;
+        }
+        /* ───────────────────────────────────────────────────── */
+
         #loader {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             color: white; pointer-events: none;
@@ -38,12 +84,44 @@
 </head>
 <body>
     <div id="portrait-warning">Veuillez tourner votre appareil en mode Paysage 🔄</div>
-    <div id="ui-coords">
-        <strong>POSITION DU PERSO</strong><br>
-        X: <span id="val-x">0.00</span><br>
-        Z: <span id="val-z">0.00</span><br>
-        <small style="color: #00aaff;">Centre (Boule): 0, 0</small>
+    <div id="ui-status" style="position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: #00ff00; padding: 15px; border-radius: 8px; border: 1px solid #00ff00; font-size: 12px; pointer-events: none; z-index: 20; min-width: 180px;">
+        <div style="margin-bottom: 12px; color: #00ff00; border-bottom: 1px solid #00ff00; padding-bottom: 8px;">
+            <strong>STATUS</strong>
+        </div>
+        <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; pointer-events: all;">
+            <span id="audio-status-text">🎙️ Micro</span>
+            <label class="md-switch" title="Activer / couper le micro">
+                <input type="checkbox" id="mic-toggle" checked>
+                <span class="md-switch-track"><span class="md-switch-thumb"></span></span>
+            </label>
+        </div>
+        <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; pointer-events: all;">
+            <span id="headset-status-text">🎧 Casque</span>
+            <label class="md-switch" title="Activer / couper le son reçu">
+                <input type="checkbox" id="headset-toggle" checked>
+                <span class="md-switch-track"><span class="md-switch-thumb"></span></span>
+            </label>
+        </div>
+        <div style="margin-bottom: 12px; border-bottom: 1px solid #00ff00; padding-bottom: 8px;">
+            <strong>Joueurs: <span id="player-count">0</span>/10</strong>
+        </div>
+        <div style="font-size: 12px;">
+            <strong>Connectés:</strong><br>
+            <div id="player-list" style="margin-top: 5px; max-height: 150px; overflow-y: auto; font-size: 11px;">
+                <span style="color: #888;">-- En attente --</span>
+            </div>
+        </div>
     </div>
+    
+    <div id="modal-pseudo" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 999; display: flex; justify-content: center; align-items: center;">
+        <div style="background: #222; padding: 30px; border-radius: 10px; border: 2px solid #00ff00; color: white; text-align: center; min-width: 300px;">
+            <h2 style="margin-top: 0; color: #00ff00;">BIENVENUE</h2>
+            <p>Entrez votre pseudo pour commencer :</p>
+            <input type="text" id="input-pseudo" placeholder="Votre pseudo..." style="width: 100%; padding: 10px; margin: 10px 0; background: #333; color: white; border: 1px solid #00ff00; border-radius: 5px; font-size: 16px;" maxlength="20">
+            <button id="btn-start" style="width: 100%; padding: 10px; margin-top: 10px; background: #00ff00; color: #000; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 16px;">DÉMARRER</button>
+        </div>
+    </div>
+    
     <div id="loader">Chargement...</div>
     <div id="joystick-zone"></div>
 
@@ -58,24 +136,109 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
 
     <script type="module">
+        // Forcer le rechargement en cas de mise à jour
+        const VERSION = '20260309-001';
+        console.log(`[📦] Version: ${VERSION}`);
+        
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+        import { initMap } from './map.js?v=20260309-001';
+        import { MultiplayerClient } from './client.js?v=20260309-001';
+        import { WebRTCAudioManager } from './webrtc-audio.js?v=20260309-001';
+        import { initJoystick, updateMovement, moveData } from './player-controller.js?v=20260310-001';
 
         let scene, camera, renderer, mixer, clock, model, controls;
         let walkAction, idleAction;
-        let moveData = { active: false, angle: 0, distance: 0 };
         let beaconLight, beaconMesh;
+        let multiplayerClient = null;
+        let otherPlayerMeshes = {}; // { playerId: { mesh, mixer, idleAction, walkAction } }
+        let playerPseudo = '';
+        let playerColor = 0xFFFFFF; // Couleur du joueur
+        let localStream = null;
+        let peerConnections = {};
+        let webrtcAudioManager = null;
+        let micEnabled = true;       // État du switch micro
+        let headsetEnabled = true;   // État du switch casque
+        let remoteAudioElements = []; // Éléments <audio> distants pour contrôle casque
+        let gltfSoldierModel = null; // Modèle chargé une seule fois pour le cloner
+        let connectedPlayers = {}; // { playerId: pseudo }
+        let playerColors = {}; // { playerId: colorHex }
+        let pendingPlayers = []; // Queue de joueurs en attente de création du mesh
+        let otherPlayerLabels = {}; // { playerId: div HTML label 2D }
+        
+        // Palette de couleurs pour les joueurs (tous en bleu)
+        const COLOR_PALETTE = [
+            0x0066FF, 0x0080FF, 0x0099FF, 0x00AAFF, 0x00BBFF,
+            0x0033FF, 0x0044FF, 0x0055FF, 0x003399, 0x0055CC,
+            0x0077FF, 0x0088FF, 0x00BBFF
+        ];
+        let usedColors = []; // Couleurs déjà assignées
 
         // Elements UI
-        const elX = document.getElementById('val-x');
-        const elZ = document.getElementById('val-z');
+        const modalPseudo = document.getElementById('modal-pseudo');
+        const inputPseudo = document.getElementById('input-pseudo');
+        const btnStart = document.getElementById('btn-start');
+        const playerCount = document.getElementById('player-count');
+        const playerList = document.getElementById('player-list');
 
-        const MOVE_SPEED = 5.0; 
+        const MAP_SIZE = 100; // Taille de la map
+        const SPAWN_SAFE_RADIUS = 10; // Rayon sécurisé autour du point 0
+        
+        function getRandomSpawnPosition() {
+            // Générer une position aléatoire dans la map, mais pas trop proche du centre
+            let x, z, distance;
+            do {
+                x = (Math.random() - 0.5) * MAP_SIZE;
+                z = (Math.random() - 0.5) * MAP_SIZE;
+                distance = Math.sqrt(x * x + z * z);
+            } while (distance < SPAWN_SAFE_RADIUS);
+            return { x, z };
+        }
+        
+        function getAvailableColor() {
+            // Trouver une couleur non utilisée
+            for (const color of COLOR_PALETTE) {
+                if (!usedColors.includes(color)) {
+                    usedColors.push(color);
+                    return color;
+                }
+            }
+            // Fallback : couleur aléatoire
+            return Math.floor(Math.random() * 16777215);
+        }
+        
+        function colorizeModel(modelScene, colorHex) {
+            modelScene.traverse(child => {
+                if (child.isMesh && child.material) {
+                    if (child.material.color) {
+                        child.material.color.setHex(colorHex);
+                    }
+                }
+            });
+        }
 
-        init();
+        // ── Switches micro / casque ──────────────────────────────────────
+        document.getElementById('mic-toggle').addEventListener('change', (e) => {
+            micEnabled = e.target.checked;
+            if (localStream) {
+                localStream.getAudioTracks().forEach(track => { track.enabled = micEnabled; });
+            }
+            console.log(`[🎙️] Micro: ${micEnabled ? 'ON' : 'OFF'}`);
+        });
 
-        function init() {
+        document.getElementById('headset-toggle').addEventListener('change', (e) => {
+            headsetEnabled = e.target.checked;
+            remoteAudioElements.forEach(audio => { audio.muted = !headsetEnabled; });
+            console.log(`[🎧] Casque: ${headsetEnabled ? 'ON' : 'OFF'}`);
+        });
+        // ────────────────────────────────────────────────────────────────────
+
+        // Afficher le modal au lancement
+        showPseudoModal();
+
+        async function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x1a1a1a);
             scene.fog = new THREE.Fog(0x1a1a1a, 5, 45);
@@ -130,11 +293,21 @@
             groundGroup.add(grid);
             scene.add(groundGroup);
 
+            // Charger la carte
+            initMap(scene, THREE);
+
+            // Initialiser le multijoueur AVANT de charger le modèle
+            await initMultiplayer();
+
             const loader = new GLTFLoader();
             loader.load('https://threejs.org/examples/models/gltf/Soldier.glb', (gltf) => {
+                gltfSoldierModel = gltf; // Stocker pour cloner les autres joueurs
+                
                 model = gltf.scene;
-                model.position.set(2, 0, 2); 
+                const spawnPos = getRandomSpawnPosition();
+                model.position.set(spawnPos.x, 0, spawnPos.z);
                 scene.add(model);
+                colorizeModel(model, playerColor); // Appliquer la couleur au joueur
                 model.traverse(o => { if (o.isMesh) o.castShadow = true; });
 
                 mixer = new THREE.AnimationMixer(model);
@@ -145,59 +318,20 @@
                 walkAction.play();
                 walkAction.setEffectiveWeight(0);
                 
+                // Traiter les joueurs en attente
+                processPendingPlayers();
+                
+                // Envoyer la position initiale au serveur
+                if (multiplayerClient) {
+                    multiplayerClient.sendPlayerUpdate(model.position, model.rotation.y, 'idle');
+                }
+                
                 document.getElementById('loader').style.display = 'none';
                 initJoystick();
                 animate();
             });
 
             window.addEventListener('resize', onWindowResize);
-        }
-
-        function initJoystick() {
-            const manager = nipplejs.create({
-                zone: document.getElementById('joystick-zone'),
-                mode: 'static',
-                position: { left: '50%', top: '50%' },
-                color: 'white', size: 100
-            });
-
-            manager.on('move', (evt, data) => {
-                moveData.active = true;
-                moveData.angle = data.angle.radian; 
-                moveData.distance = data.distance / 50;
-            });
-
-            manager.on('end', () => { moveData.active = false; });
-        }
-
-        function updateMovement(delta) {
-            if (!model || !mixer) return;
-
-            if (moveData.active) {
-                const angleCamera = Math.atan2(
-                    camera.position.x - model.position.x,
-                    camera.position.z - model.position.z
-                );
-                
-                model.rotation.y = angleCamera + moveData.angle - Math.PI / 2;
-
-                const speed = MOVE_SPEED * delta * moveData.distance;
-                model.translateZ(-speed);
-
-                walkAction.setEffectiveWeight(1);
-                idleAction.setEffectiveWeight(0);
-                walkAction.timeScale = moveData.distance * 1.4;
-
-                controls.target.copy(model.position).add(new THREE.Vector3(0, 1.5, 0));
-            } else {
-                walkAction.setEffectiveWeight(0);
-                idleAction.setEffectiveWeight(1);
-                controls.target.copy(model.position).add(new THREE.Vector3(0, 1.5, 0));
-            }
-
-            // MISE À JOUR UI
-            elX.innerText = model.position.x.toFixed(2);
-            elZ.innerText = model.position.z.toFixed(2);
         }
 
         function updateBeacon(elapsedTime) {
@@ -209,10 +343,275 @@
             }
         }
 
+        async function initMultiplayer() {
+            try {
+                multiplayerClient = new MultiplayerClient();
+                
+                // IMPORTANT: définir les callbacks AVANT connect() pour éviter la race condition
+                // Le serveur envoie playersExist dès la connexion
+                multiplayerClient.onPlayerJoined = (player) => {
+                    console.log('Joueur rejoint/existant:', player.pseudo);
+                    connectedPlayers[player.id] = player.pseudo;
+                    playerColors[player.id] = player.color || 0xFFFFFF; // Récupérer la couleur du joueur
+                    updatePlayersList();
+                    createOtherPlayerMesh(player.id, player.pseudo, playerColors[player.id]);
+                    
+                    if (webrtcAudioManager) {
+                        setTimeout(() => {
+                            webrtcAudioManager.callPeer(player.id);
+                        }, 500);
+                    }
+                };
+                
+                multiplayerClient.onPlayerUpdate = (data) => {
+                    updateOtherPlayerMesh(data.id, data.position, data.rotation);
+                    updateOtherPlayerAnimation(data.id, data.animation === 'walk');
+                };
+                
+                multiplayerClient.onPlayerDisconnected = (playerId) => {
+                    console.log('Joueur déconnecté:', playerId);
+                    delete connectedPlayers[playerId];
+                    updatePlayersList();
+                    removeOtherPlayerMesh(playerId);
+                    
+                    if (webrtcAudioManager) {
+                        webrtcAudioManager.closePeerConnection(playerId);
+                    }
+                };
+                
+                await multiplayerClient.connect(playerPseudo, playerColor);
+                
+                // Ajouter le joueur lui-même à la liste
+                connectedPlayers[multiplayerClient.playerId] = playerPseudo;
+                playerColors[multiplayerClient.playerId] = playerColor;
+                updatePlayersList();
+                
+                // Initialiser le gestionnaire WebRTC audio
+                if (localStream && multiplayerClient.socket) {
+                    webrtcAudioManager = new WebRTCAudioManager(multiplayerClient.socket, localStream);
+                    console.log('[✓] WebRTC Audio Manager initialisé');
+                    
+                    webrtcAudioManager.onRemoteStream = (peerId, remoteStream) => {
+                        console.log(`[🔊] Connexion audio établie avec ${peerId}`);
+                        playRemoteAudio(remoteStream);
+                    };
+                    
+                    webrtcAudioManager.onRemoteStreamRemoved = (peerId) => {
+                        console.log(`[🔌] Flux audio fermé pour ${peerId}`);
+                    };
+                }
+                
+                console.log('[✓] Multijoueur initialisé');
+            } catch (error) {
+                console.error('[✗] Erreur multijoueur:', error);
+            }
+        }
+
+        function playRemoteAudio(remoteStream) {
+            // Créer un élément audio caché pour jouer le stream distant
+            const audio = document.createElement('audio');
+            audio.srcObject = remoteStream;
+            audio.autoplay = true;
+            audio.playsinline = true;
+            audio.muted = !headsetEnabled; // Respecter l'état courant du switch casque
+            audio.style.display = 'none';
+            document.body.appendChild(audio);
+            remoteAudioElements.push(audio); // Suivre pour contrôle casque
+        }
+
+        function createOtherPlayerMesh(playerId, pseudo = 'Joueur', color = 0xFFFFFF) {
+            // Si le modèle n'a pas encore été chargé, ajouter à la queue
+            if (!gltfSoldierModel) {
+                console.log(`[⏳] Modèle en cours de chargement pour ${pseudo}, ajout à la queue`);
+                pendingPlayers.push({ playerId, pseudo, color });
+                return;
+            }
+            
+            // Cloner le modèle du soldat (SkeletonUtils requis pour les SkinnedMesh)
+            const clonedScene = SkeletonUtils.clone(gltfSoldierModel.scene);
+            clonedScene.position.set(0, 0, 0);
+            colorizeModel(clonedScene, color); // Appliquer la couleur
+            clonedScene.traverse(o => { if (o.isMesh) o.castShadow = true; });
+            scene.add(clonedScene);
+            
+            // Créer un mixer pour les animations
+            const cloneMixer = new THREE.AnimationMixer(clonedScene);
+            const idleClone = cloneMixer.clipAction(gltfSoldierModel.animations[0]);
+            const walkClone = cloneMixer.clipAction(gltfSoldierModel.animations[1]);
+            
+            idleClone.play();
+            walkClone.play();
+            walkClone.setEffectiveWeight(0);
+            
+            // Créer le label HTML 2D avec la couleur du joueur
+            createPlayerLabel2D(playerId, pseudo, color);
+            
+            otherPlayerMeshes[playerId] = {
+                mesh: clonedScene,
+                mixer: cloneMixer,
+                idleAction: idleClone,
+                walkAction: walkClone,
+                pseudo: pseudo,
+                isMoving: false
+            };
+            
+            console.log(`[✓] Joueur ${pseudo} créé avec le modèle Soldier`);
+        }
+
+        function processPendingPlayers() {
+            console.log(`[🔄] Traitement de ${pendingPlayers.length} joueurs en attente`);
+            while (pendingPlayers.length > 0) {
+                const { playerId, pseudo, color } = pendingPlayers.shift();
+                createOtherPlayerMesh(playerId, pseudo, color);
+            }
+        }
+
+        function updateOtherPlayerMesh(playerId, position, rotation) {
+            if (otherPlayerMeshes[playerId]) {
+                const player = otherPlayerMeshes[playerId];
+                player.mesh.position.copy(position);
+                player.mesh.position.y += 0; // Ajustement de hauteur si nécessaire
+                player.mesh.rotation.y = rotation;
+            }
+        }
+
+        function updateOtherPlayerAnimation(playerId, isMoving) {
+            if (otherPlayerMeshes[playerId]) {
+                const player = otherPlayerMeshes[playerId];
+                const weight = isMoving ? 1 : 0;
+                player.walkAction.setEffectiveWeight(weight);
+                player.idleAction.setEffectiveWeight(1 - weight);
+                player.isMoving = isMoving;
+            }
+        }
+
+        function removeOtherPlayerMesh(playerId) {
+            if (otherPlayerMeshes[playerId]) {
+                scene.remove(otherPlayerMeshes[playerId].mesh);
+                delete otherPlayerMeshes[playerId];
+            }
+            if (otherPlayerLabels[playerId]) {
+                otherPlayerLabels[playerId].remove();
+                delete otherPlayerLabels[playerId];
+            }
+        }
+
+        function createPlayerLabel2D(playerId, pseudo, color = 0xFFFFFF) {
+            const label = document.createElement('div');
+            label.id = `label-${playerId}`;
+            const colorHex = '#' + color.toString(16).padStart(6, '0');
+            label.style.cssText = `
+                position: absolute;
+                color: ${colorHex};
+                font-family: 'Courier New', monospace;
+                font-weight: bold;
+                font-size: 14px;
+                text-shadow: 0 0 4px #000, 2px 2px 4px #000;
+                white-space: nowrap;
+                pointer-events: none;
+                z-index: 10;
+                transform: translateX(-50%);
+            `;
+            label.textContent = pseudo;
+            document.body.appendChild(label);
+            otherPlayerLabels[playerId] = label;
+        }
+
+        function updatePlayerLabels2D() {
+            for (const [playerId, labelDiv] of Object.entries(otherPlayerLabels)) {
+                const playerData = otherPlayerMeshes[playerId];
+                if (playerData) {
+                    // Projeter la position 3D en coordonnées écran
+                    const worldPos = playerData.mesh.position.clone();
+                    worldPos.y += 2.8; // Au-dessus du personnage
+                    const screenPos = worldPos.project(camera);
+                    
+                    const x = (screenPos.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (-screenPos.y * 0.5 + 0.5) * window.innerHeight;
+                    
+                    labelDiv.style.left = `${x}px`;
+                    labelDiv.style.top = `${y}px`;
+                    
+                    // Cacher le label si hors écran
+                    if (screenPos.z < 0 || screenPos.x < -1 || screenPos.x > 1 || screenPos.y < -1 || screenPos.y > 1) {
+                        labelDiv.style.display = 'none';
+                    } else {
+                        labelDiv.style.display = 'block';
+                    }
+                }
+            }
+        }
+
+        function updatePlayersList() {
+            playerCount.textContent = Object.keys(connectedPlayers).length;
+            
+            if (Object.keys(connectedPlayers).length === 0) {
+                playerList.innerHTML = '<span style="color: #888;">-- En attente --</span>';
+                return;
+            }
+            
+            let html = '';
+            for (const [playerId, pseudo] of Object.entries(connectedPlayers)) {
+                html += `<div style="padding: 3px; color: #00ff00;">✓ ${pseudo}</div>`;
+            }
+            playerList.innerHTML = html;
+        }
+
+        function updateAudioStatus(hasMic, hasHeadset) {
+            // Synchroniser les switches avec l'état réel (ex: erreur mic)
+            const micToggle = document.getElementById('mic-toggle');
+            const headsetToggleEl = document.getElementById('headset-toggle');
+            if (micToggle) micToggle.checked = hasMic;
+            if (headsetToggleEl) headsetToggleEl.checked = hasHeadset;
+            micEnabled = hasMic;
+            headsetEnabled = hasHeadset;
+        }
+
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function showPseudoModal() {
+            modalPseudo.style.display = 'flex';
+            inputPseudo.focus();
+            
+            btnStart.onclick = async () => {
+                playerPseudo = inputPseudo.value.trim() || 'Joueur' + Math.floor(Math.random() * 1000);
+                playerColor = getAvailableColor(); // Assigner une couleur
+                modalPseudo.style.display = 'none';
+                
+                await initAudio();
+                await init();
+            };
+            
+            inputPseudo.onkeypress = (e) => {
+                if (e.key === 'Enter') btnStart.click();
+            };
+        }
+
+        async function initAudio() {
+            try {
+                // Configuration audio optimisée pour clarté avec peu de bande passante
+                const constraints = {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: false,
+                        channelCount: 1, // Mono pour économiser la bande
+                        sampleRate: 16000, // 16 kHz suffisant pour la parole
+                        sampleSize: 16
+                    }
+                };
+                
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                updateAudioStatus(true, true); // Micro et casque ON
+                console.log('[✓] Microphone autorisé avec optimisations audio');
+            } catch (error) {
+                console.error('[✗] Erreur audio:', error);
+                updateAudioStatus(false, false);
+            }
         }
 
         function animate() {
@@ -221,8 +620,19 @@
             const elapsedTime = clock.getElapsedTime(); 
             
             if (mixer) mixer.update(delta);
-            updateMovement(delta);
+            
+            // Mettre à jour les animations des autres joueurs
+            Object.values(otherPlayerMeshes).forEach(player => {
+                if (player.mixer) player.mixer.update(delta);
+            });
+            
+            updateMovement(delta, model, mixer, camera, controls, walkAction, idleAction,
+                (pos, rotY, anim) => {
+                    if (multiplayerClient) multiplayerClient.sendPlayerUpdate(pos, rotY, anim);
+                }
+            );
             updateBeacon(elapsedTime);
+            updatePlayerLabels2D();
             controls.update();
             renderer.render(scene, camera);
         }
