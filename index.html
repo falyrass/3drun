@@ -29,7 +29,53 @@
         #joystick-zone {
             position: absolute; bottom: 30px; left: 30px; width: 120px; height: 120px; z-index: 10;
         }
-        
+
+        /* ── Bouton switch Material Design ─────────────────── */
+        .md-switch {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            width: 40px;
+            height: 24px;
+            cursor: pointer;
+            flex-shrink: 0;
+            margin-left: 10px;
+        }
+        .md-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+        .md-switch-track {
+            position: absolute;
+            top: 4px; left: 0;
+            width: 40px;
+            height: 16px;
+            background: #555;
+            border-radius: 8px;
+            transition: background 0.25s ease;
+        }
+        .md-switch-thumb {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #9e9e9e;
+            top: 2px;
+            left: 0px;
+            transition: left 0.25s ease, background 0.25s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+        .md-switch input:checked + .md-switch-track {
+            background: rgba(76,175,80,0.45);
+        }
+        .md-switch input:checked + .md-switch-track .md-switch-thumb {
+            background: #4CAF50;
+            left: 20px;
+        }
+        /* ───────────────────────────────────────────────────── */
+
         #loader {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             color: white; pointer-events: none;
@@ -42,11 +88,19 @@
         <div style="margin-bottom: 12px; color: #00ff00; border-bottom: 1px solid #00ff00; padding-bottom: 8px;">
             <strong>STATUS</strong>
         </div>
-        <div style="margin-bottom: 8px;">
-            <span id="audio-status-text">🎙️ Micro: ?</span>
+        <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; pointer-events: all;">
+            <span id="audio-status-text">🎙️ Micro</span>
+            <label class="md-switch" title="Activer / couper le micro">
+                <input type="checkbox" id="mic-toggle" checked>
+                <span class="md-switch-track"><span class="md-switch-thumb"></span></span>
+            </label>
         </div>
-        <div style="margin-bottom: 8px;">
-            <span id="headset-status-text">🎧 Casque: ?</span>
+        <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; pointer-events: all;">
+            <span id="headset-status-text">🎧 Casque</span>
+            <label class="md-switch" title="Activer / couper le son reçu">
+                <input type="checkbox" id="headset-toggle" checked>
+                <span class="md-switch-track"><span class="md-switch-thumb"></span></span>
+            </label>
         </div>
         <div style="margin-bottom: 12px; border-bottom: 1px solid #00ff00; padding-bottom: 8px;">
             <strong>Joueurs: <span id="player-count">0</span>/10</strong>
@@ -93,10 +147,10 @@
         import { initMap } from './map.js?v=20260309-001';
         import { MultiplayerClient } from './client.js?v=20260309-001';
         import { WebRTCAudioManager } from './webrtc-audio.js?v=20260309-001';
+        import { initJoystick, updateMovement, moveData } from './player-controller.js?v=20260310-001';
 
         let scene, camera, renderer, mixer, clock, model, controls;
         let walkAction, idleAction;
-        let moveData = { active: false, angle: 0, distance: 0 };
         let beaconLight, beaconMesh;
         let multiplayerClient = null;
         let otherPlayerMeshes = {}; // { playerId: { mesh, mixer, idleAction, walkAction } }
@@ -105,6 +159,9 @@
         let localStream = null;
         let peerConnections = {};
         let webrtcAudioManager = null;
+        let micEnabled = true;       // État du switch micro
+        let headsetEnabled = true;   // État du switch casque
+        let remoteAudioElements = []; // Éléments <audio> distants pour contrôle casque
         let gltfSoldierModel = null; // Modèle chargé une seule fois pour le cloner
         let connectedPlayers = {}; // { playerId: pseudo }
         let playerColors = {}; // { playerId: colorHex }
@@ -123,12 +180,9 @@
         const modalPseudo = document.getElementById('modal-pseudo');
         const inputPseudo = document.getElementById('input-pseudo');
         const btnStart = document.getElementById('btn-start');
-        const audioStatusText = document.getElementById('audio-status-text');
-        const headsetStatusText = document.getElementById('headset-status-text');
         const playerCount = document.getElementById('player-count');
         const playerList = document.getElementById('player-list');
 
-        const MOVE_SPEED = 5.0;
         const MAP_SIZE = 100; // Taille de la map
         const SPAWN_SAFE_RADIUS = 10; // Rayon sécurisé autour du point 0
         
@@ -164,6 +218,22 @@
                 }
             });
         }
+
+        // ── Switches micro / casque ──────────────────────────────────────
+        document.getElementById('mic-toggle').addEventListener('change', (e) => {
+            micEnabled = e.target.checked;
+            if (localStream) {
+                localStream.getAudioTracks().forEach(track => { track.enabled = micEnabled; });
+            }
+            console.log(`[🎙️] Micro: ${micEnabled ? 'ON' : 'OFF'}`);
+        });
+
+        document.getElementById('headset-toggle').addEventListener('change', (e) => {
+            headsetEnabled = e.target.checked;
+            remoteAudioElements.forEach(audio => { audio.muted = !headsetEnabled; });
+            console.log(`[🎧] Casque: ${headsetEnabled ? 'ON' : 'OFF'}`);
+        });
+        // ────────────────────────────────────────────────────────────────────
 
         // Afficher le modal au lancement
         showPseudoModal();
@@ -264,58 +334,6 @@
             window.addEventListener('resize', onWindowResize);
         }
 
-        function initJoystick() {
-            const manager = nipplejs.create({
-                zone: document.getElementById('joystick-zone'),
-                mode: 'static',
-                position: { left: '50%', top: '50%' },
-                color: 'white', size: 100
-            });
-
-            manager.on('move', (evt, data) => {
-                moveData.active = true;
-                moveData.angle = data.angle.radian; 
-                moveData.distance = data.distance / 50;
-            });
-
-            manager.on('end', () => { moveData.active = false; });
-        }
-
-        function updateMovement(delta) {
-            if (!model || !mixer) return;
-
-            if (moveData.active) {
-                const angleCamera = Math.atan2(
-                    camera.position.x - model.position.x,
-                    camera.position.z - model.position.z
-                );
-                
-                model.rotation.y = angleCamera + moveData.angle - Math.PI / 2;
-
-                const speed = MOVE_SPEED * delta * moveData.distance;
-                model.translateZ(-speed);
-
-                walkAction.setEffectiveWeight(1);
-                idleAction.setEffectiveWeight(0);
-                walkAction.timeScale = moveData.distance * 1.4;
-
-                controls.target.copy(model.position).add(new THREE.Vector3(0, 1.5, 0));
-            } else {
-                walkAction.setEffectiveWeight(0);
-                idleAction.setEffectiveWeight(1);
-                controls.target.copy(model.position).add(new THREE.Vector3(0, 1.5, 0));
-            }
-
-            // Envoyer la position au serveur multijoueur
-            if (multiplayerClient) {
-                multiplayerClient.sendPlayerUpdate(
-                    model.position,
-                    model.rotation.y,
-                    moveData.active ? 'walk' : 'idle'
-                );
-            }
-        }
-
         function updateBeacon(elapsedTime) {
             if (beaconLight) {
                 const intensity = Math.sin(elapsedTime * 4) * 2.5 + 3.5;
@@ -395,8 +413,10 @@
             audio.srcObject = remoteStream;
             audio.autoplay = true;
             audio.playsinline = true;
+            audio.muted = !headsetEnabled; // Respecter l'état courant du switch casque
             audio.style.display = 'none';
             document.body.appendChild(audio);
+            remoteAudioElements.push(audio); // Suivre pour contrôle casque
         }
 
         function createOtherPlayerMesh(playerId, pseudo = 'Joueur', color = 0xFFFFFF) {
@@ -538,11 +558,13 @@
         }
 
         function updateAudioStatus(hasMic, hasHeadset) {
-            audioStatusText.textContent = hasMic ? '✓ 🎙️ Micro: ON' : '✗ 🎙️ Micro: OFF';
-            audioStatusText.style.color = hasMic ? '#00ff00' : '#ff6600';
-            
-            headsetStatusText.textContent = hasHeadset ? '✓ 🎧 Casque: ON' : '✗ 🎧 Casque: OFF';
-            headsetStatusText.style.color = hasHeadset ? '#00ff00' : '#ff6600';
+            // Synchroniser les switches avec l'état réel (ex: erreur mic)
+            const micToggle = document.getElementById('mic-toggle');
+            const headsetToggleEl = document.getElementById('headset-toggle');
+            if (micToggle) micToggle.checked = hasMic;
+            if (headsetToggleEl) headsetToggleEl.checked = hasHeadset;
+            micEnabled = hasMic;
+            headsetEnabled = hasHeadset;
         }
 
         function onWindowResize() {
@@ -604,7 +626,11 @@
                 if (player.mixer) player.mixer.update(delta);
             });
             
-            updateMovement(delta);
+            updateMovement(delta, model, mixer, camera, controls, walkAction, idleAction,
+                (pos, rotY, anim) => {
+                    if (multiplayerClient) multiplayerClient.sendPlayerUpdate(pos, rotY, anim);
+                }
+            );
             updateBeacon(elapsedTime);
             updatePlayerLabels2D();
             controls.update();
