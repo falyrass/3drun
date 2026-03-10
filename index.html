@@ -144,7 +144,7 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-        import { initMap, preloadMapAssets, collidableObjects } from './map.js?v=20260310-002';
+        import { initMap, preloadMapAssets, collidableObjects, mapBounds } from './map.js?v=20260310-002';
         import { MultiplayerClient } from './client.js?v=20260309-001';
         import { WebRTCAudioManager } from './webrtc-audio.js?v=20260309-001';
         import { initJoystick, updateMovement, moveData } from './player-controller.js?v=20260310-002';
@@ -256,8 +256,10 @@
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
-            controls.minDistance = 8;
-            controls.maxDistance = 8; 
+            // -- Corrections Caméra --
+            controls.minDistance = 1.8;  // Distance très proche (rapprochée pour perso petit)
+            controls.maxDistance = 1.8;  // Zoom Fixe
+            controls.maxPolarAngle = Math.PI / 2 - 0.1; // Restreindre l'angle (pas trop bas sous le sol)
             controls.enablePan = false; 
 
             // Point bleu fixe au centre
@@ -285,8 +287,8 @@
                 gltfSoldierModel = gltf; // Stocker pour cloner les autres joueurs
                 
                 model = gltf.scene;
-                // --- Réduction de la taille du personnage de 30% ---
-                model.scale.set(0.7, 0.7, 0.7);
+                // --- Réduction de la taille du personnage à 0.42 (encore -40% de 0.7) ---
+                model.scale.set(0.42, 0.42, 0.42);
                 // ----------------------------------------------------
                 const spawnPos = getRandomSpawnPosition();
                 model.position.set(spawnPos.x, 50, spawnPos.z);
@@ -414,7 +416,7 @@
             // Cloner le modèle du soldat (SkeletonUtils requis pour les SkinnedMesh)
             const clonedScene = SkeletonUtils.clone(gltfSoldierModel.scene);
             clonedScene.position.set(0, 0, 0);
-            clonedScene.scale.set(0.7, 0.7, 0.7); // <- Réduire aussi les autres joueurs
+            clonedScene.scale.set(0.42, 0.42, 0.42); // <- Réduire aussi les autres joueurs
             colorizeModel(clonedScene, color); // Appliquer la couleur
             clonedScene.traverse(o => { if (o.isMesh) o.castShadow = true; });
             scene.add(clonedScene);
@@ -616,6 +618,14 @@
                     if (multiplayerClient) multiplayerClient.sendPlayerUpdate(pos, rotY, anim);
                 }
             );
+
+            // ---> CHECK CHUTE (Respawn au centre si < mapBounds.respawnY) <---
+            if (model && model.position.y < mapBounds.respawnY) {
+                const spawnPos = getRandomSpawnPosition();
+                model.position.set(spawnPos.x, 50, spawnPos.z);
+            }
+            // ------------------------------------------------------------------
+
             updateBeacon(elapsedTime);
             updatePlayerLabels2D();
             controls.update();

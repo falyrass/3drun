@@ -3,6 +3,35 @@
 
 let externalGridModel = null;
 export const collidableObjects = []; // Exporté pour les collisions du player-controller
+export const mapBounds = { minY: 0, respawnY: -15 }; // Limites pour la chute
+
+// Fonction utilitaire pour créer des murs d'énergie visibles
+function createEnergyWall(scene, THREE, width, height, position, rotation) {
+    const geo = new THREE.PlaneGeometry(width, height);
+    const mat = new THREE.MeshBasicMaterial({ 
+        color: 0x00ffff, 
+        transparent: true, 
+        opacity: 0.3, 
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(position);
+    if (rotation) {
+        mesh.rotation.copy(rotation);
+    }
+    scene.add(mesh);
+    
+    // Mettre un mesh invisible plus large pour le collider physique (Box) car on evite de collisionner des Planes fin
+    const colliderGeo = new THREE.BoxGeometry(width, height, 2);
+    const colliderMat = new THREE.MeshBasicMaterial({ visible: false });
+    const colliderMesh = new THREE.Mesh(colliderGeo, colliderMat);
+    colliderMesh.position.copy(position);
+    if (rotation) colliderMesh.rotation.copy(rotation);
+    scene.add(colliderMesh);
+    collidableObjects.push(colliderMesh);
+}
 
 /**
  * Précharge le modèle 3D externe si disponible
@@ -77,7 +106,31 @@ export function initMap(scene, THREE) {
                 collidableObjects.push(child);
             }
         });
-        console.log('[✓] Ville GLTF 3D construite avec collisions activées.');
+
+        // ---------------- CALCUL AUTO BORDERS ET MURS ENERGETIQUES ----------------
+        const box = new THREE.Box3().setFromObject(externalGridModel);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        
+        mapBounds.minY = box.min.y;
+        mapBounds.respawnY = box.min.y - 10; // C'est le "auto"
+
+        const wallHeight = 50;
+        const wY = center.y + wallHeight/2;
+
+        // Front Wall
+        createEnergyWall(scene, THREE, size.x, wallHeight, new THREE.Vector3(center.x, wY, box.min.z));
+        // Back Wall
+        createEnergyWall(scene, THREE, size.x, wallHeight, new THREE.Vector3(center.x, wY, box.max.z));
+        // Left Wall
+        createEnergyWall(scene, THREE, size.z, wallHeight, new THREE.Vector3(box.min.x, wY, center.z), new THREE.Euler(0, Math.PI/2, 0));
+        // Right Wall
+        createEnergyWall(scene, THREE, size.z, wallHeight, new THREE.Vector3(box.max.x, wY, center.z), new THREE.Euler(0, Math.PI/2, 0));
+        // -------------------------------------------------------------------------
+
+        console.log('[✓] Ville GLTF 3D construite avec murs et collisions activés.');
         return;
     }
 
