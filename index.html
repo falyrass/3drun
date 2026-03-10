@@ -144,10 +144,10 @@
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-        import { initMap } from './map.js?v=20260309-001';
+        import { initMap, preloadMapAssets, collidableObjects } from './map.js?v=20260310-002';
         import { MultiplayerClient } from './client.js?v=20260309-001';
         import { WebRTCAudioManager } from './webrtc-audio.js?v=20260309-001';
-        import { initJoystick, updateMovement, moveData } from './player-controller.js?v=20260310-001';
+        import { initJoystick, updateMovement, moveData } from './player-controller.js?v=20260310-002';
 
         let scene, camera, renderer, mixer, clock, model, controls;
         let walkAction, idleAction;
@@ -187,14 +187,13 @@
         const SPAWN_SAFE_RADIUS = 10; // Rayon sécurisé autour du point 0
         
         function getRandomSpawnPosition() {
-            // Générer une position aléatoire dans la map, mais pas trop proche du centre
-            let x, z, distance;
-            do {
-                x = (Math.random() - 0.5) * MAP_SIZE;
-                z = (Math.random() - 0.5) * MAP_SIZE;
-                distance = Math.sqrt(x * x + z * z);
-            } while (distance < SPAWN_SAFE_RADIUS);
-            return { x, z };
+            // Un cercle aléatoire de rayon MAX 10 mètres autour du centre
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.sqrt(Math.random()) * 10;
+            return {
+                x: Math.cos(angle) * radius,
+                z: Math.sin(angle) * radius
+            };
         }
         
         function getAvailableColor() {
@@ -240,11 +239,11 @@
 
         async function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
-            scene.fog = new THREE.Fog(0x1a1a1a, 5, 45);
+            // Le background et le fog sont gérés dans initMap()
 
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 5, 10);
+            // Caméra rapprochée : 40% de la distance initiale (Z=4, Y=2)
+            camera.position.set(0, 2, 4);
 
             clock = new THREE.Clock();
 
@@ -261,12 +260,6 @@
             controls.maxDistance = 8; 
             controls.enablePan = false; 
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-            dirLight.position.set(10, 20, 10);
-            dirLight.castShadow = true;
-            scene.add(dirLight);
-
             // Point bleu fixe au centre
             beaconLight = new THREE.PointLight(0x00aaff, 5, 15);
             beaconLight.position.set(0, 1.2, 0); 
@@ -278,22 +271,10 @@
             beaconMesh.position.copy(beaconLight.position);
             scene.add(beaconMesh);
 
-            // Sol avec grille
-            const groundGroup = new THREE.Group();
-            const ground = new THREE.Mesh(
-                new THREE.PlaneGeometry(2000, 2000), 
-                new THREE.MeshStandardMaterial({ color: 0x111111 })
-            );
-            ground.rotation.x = -Math.PI / 2;
-            ground.receiveShadow = true;
-            groundGroup.add(ground);
+            // Pré-charger le modèle externe de la ville si présent
+            await preloadMapAssets(THREE);
 
-            const grid = new THREE.GridHelper(1000, 100, 0x444444, 0x222222);
-            grid.position.y = 0.01;
-            groundGroup.add(grid);
-            scene.add(groundGroup);
-
-            // Charger la carte
+            // Charger la carte urbaine et configurer les lumières/sols/néons
             initMap(scene, THREE);
 
             // Initialiser le multijoueur AVANT de charger le modèle
@@ -304,8 +285,11 @@
                 gltfSoldierModel = gltf; // Stocker pour cloner les autres joueurs
                 
                 model = gltf.scene;
+                // --- Réduction de la taille du personnage de 30% ---
+                model.scale.set(0.7, 0.7, 0.7);
+                // ----------------------------------------------------
                 const spawnPos = getRandomSpawnPosition();
-                model.position.set(spawnPos.x, 0, spawnPos.z);
+                model.position.set(spawnPos.x, 50, spawnPos.z);
                 scene.add(model);
                 colorizeModel(model, playerColor); // Appliquer la couleur au joueur
                 model.traverse(o => { if (o.isMesh) o.castShadow = true; });
@@ -430,6 +414,7 @@
             // Cloner le modèle du soldat (SkeletonUtils requis pour les SkinnedMesh)
             const clonedScene = SkeletonUtils.clone(gltfSoldierModel.scene);
             clonedScene.position.set(0, 0, 0);
+            clonedScene.scale.set(0.7, 0.7, 0.7); // <- Réduire aussi les autres joueurs
             colorizeModel(clonedScene, color); // Appliquer la couleur
             clonedScene.traverse(o => { if (o.isMesh) o.castShadow = true; });
             scene.add(clonedScene);
@@ -626,7 +611,7 @@
                 if (player.mixer) player.mixer.update(delta);
             });
             
-            updateMovement(delta, model, mixer, camera, controls, walkAction, idleAction,
+            updateMovement(delta, model, mixer, camera, controls, walkAction, idleAction, collidableObjects,
                 (pos, rotY, anim) => {
                     if (multiplayerClient) multiplayerClient.sendPlayerUpdate(pos, rotY, anim);
                 }

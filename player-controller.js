@@ -1,24 +1,12 @@
-// player-controller.js - Logique de déplacement et contrôleur de personnage
-// ================================================================
-// ⚠️  NE PAS MODIFIER CE FICHIER
-//     La logique de déplacement et du contrôleur de personnage est
-//     validée et fonctionnelle. Toute modification peut casser le
-//     comportement du joueur. Modifier uniquement si absolument
-//     nécessaire et après tests approfondis.
-// ================================================================
-
+// player-controller.js - Logique de déplacement, collisions et contrôleur
 import * as THREE from 'three';
 
 // Constante de vitesse de déplacement
 export const MOVE_SPEED = 5.0;
 
-// État du joystick — partagé en lecture par le reste de l'app
+// État du joystick
 export const moveData = { active: false, angle: 0, distance: 0 };
 
-/**
- * Initialise le joystick NippleJS dans la zone #joystick-zone
- * et met à jour moveData en temps réel.
- */
 export function initJoystick() {
     const manager = nipplejs.create({
         zone: document.getElementById('joystick-zone'),
@@ -39,24 +27,49 @@ export function initJoystick() {
     });
 }
 
-/**
- * Met à jour la position et les animations du personnage local.
- *
- * @param {number}   delta      - Temps écoulé depuis la dernière frame (clock.getDelta())
- * @param {Object}   model      - THREE.Object3D du personnage local
- * @param {Object}   mixer      - THREE.AnimationMixer du personnage local
- * @param {Object}   camera     - THREE.Camera de la scène
- * @param {Object}   controls   - OrbitControls associés à la caméra
- * @param {Object}   walkAction - AnimationAction de marche
- * @param {Object}   idleAction - AnimationAction idle
- * @param {Function} onUpdate   - Callback appelé avec (position, rotationY, animation)
- *                               pour transmettre la position au multijoueur
- */
-export function updateMovement(delta, model, mixer, camera, controls, walkAction, idleAction, onUpdate) {
+// Raycaster "en dur" pour éviter d'en allouer pour chaque frame
+const collisionRaycaster = new THREE.Raycaster();
+const moveDir = new THREE.Vector3();
+
+// --- État de la physique (Gravité / Sauts) ---
+let velocityY = 0;
+const GRAVITY = -18.0; 
+const TERMINAL_VELOCITY = -30.0;
+
+export function updateMovement(delta, model, mixer, camera, controls, walkAction, idleAction, colliders, onUpdate) {
     if (!model || !mixer) return;
 
+    // --- 1. Gestion de la Gravité et Altitudes (Axe Y) ---
+    // On veut poser le modèle sur le sol (pente ou plat). Sinon on tombe.
+    let onGround = false;
+    if (colliders && colliders.length > 0) {
+        // Rayon projeté vers le bas depuis la tête du personnage (environ 1.05m de haut, car scale 0.7)
+        const originDown = model.position.clone();
+        originDown.y += 1.05; 
+        const downDir = new THREE.Vector3(0, -1, 0);
+        collisionRaycaster.set(originDown, downDir);
+        
+        const groundIntersects = collisionRaycaster.intersectObjects(colliders, true);
+        
+        // S'il trouve un sol sous ses pieds (distance < 1.1m pour une petite marge)
+        if (groundIntersects.length > 0 && groundIntersects[0].distance <= 1.1) {
+            onGround = true;
+            model.position.y = groundIntersects[0].point.y; // Snap précis sur le sol pour l'effet Physique (Gravité)
+            velocityY = 0;
+        } else {
+            // Chute libre (Physique pure)
+            onGround = false;
+        }
+    }
+
+    if (!onGround) {
+        velocityY += GRAVITY * delta;
+        if (velocityY < TERMINAL_VELOCITY) velocityY = TERMINAL_VELOCITY;
+        model.position.y += velocityY * delta;
+    }
+
     if (moveData.active) {
-        // Orienter le personnage selon la direction de la caméra + joystick
+        // Orienter le personnage selon la caméra + joystick
         const angleCamera = Math.atan2(
             camera.position.x - model.position.x,
             camera.position.z - model.position.z
@@ -64,25 +77,52 @@ export function updateMovement(delta, model, mixer, camera, controls, walkAction
 
         model.rotation.y = angleCamera + moveData.angle - Math.PI / 2;
 
-        // Déplacer vers l'avant selon la vitesse du joystick
         const speed = MOVE_SPEED * delta * moveData.distance;
-        model.translateZ(-speed);
 
-        // Animation marche
-        walkAction.setEffectiveWeight(1);
-        idleAction.setEffectiveWeight(0);
+        // --- Système de Collisions ---
+        let canMove = true;
+        if (colliders && colliders.length > 0) {
+            // Calculer la direction "Avant" du personnage
+            moveDir.set(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), model.rotation.y).normalize();
+            
+            // Placer le rayon à mi-hauteur du personnage pour éviter de toucher le sol (0.7m car scale 0.7)
+            const origin = model.position.clone().add(new THREE.Vector3(0, 0.7, 0));
+            collisionRaycaster.set(origin, moveDir);
+
+            // Vérifier intersection
+            const intersects = collisionRaycaster.intersectObjects(colliders, true);
+            
+            // S'il y a un obstacle devant et très proche, on check la face (mur VS pente)
+            if (intersects.length > 0 && intersects[0].distance < speed + 0.42) {
+                // Si la normale de la face touchée regarde majoritairement vers le côté/bas, c'est un mur (90°)
+                // Si la normale de la face regarde vers le haut (normal.y > 0.4), c'est une pente praticable.
+                const normalY = intersects[0].face ? intersects[0].face.normal.y : 0;
+                
+                if (normalY < 0.4) {
+                    // C'est un mur, on bloque complètement le déplacement
+                    canMove = false;
+                }
+                // Si c'est une pente (normalY >= 0.4), on ignore le blocage frontal car la gravité/raycaster vertical s'en chargera.
+            }
+        }
+
+        if (canMove) {
+            model.translateZ(-speed);
+        }
+
+        // --- Animations ---
+        walkAction.setEffectiveWeight(canMove ? 1 : 0);
+        idleAction.setEffectiveWeight(canMove ? 0 : 1);
         walkAction.timeScale = moveData.distance * 1.4;
 
-        controls.target.copy(model.position).add(new THREE.Vector3(0, 1.5, 0));
+        controls.target.copy(model.position).add(new THREE.Vector3(0, 1.05, 0));
     } else {
-        // Animation idle
+        // Mode repos
         walkAction.setEffectiveWeight(0);
         idleAction.setEffectiveWeight(1);
-
-        controls.target.copy(model.position).add(new THREE.Vector3(0, 1.5, 0));
+        controls.target.copy(model.position).add(new THREE.Vector3(0, 1.05, 0));
     }
 
-    // Notifier le multijoueur de la nouvelle position
     if (onUpdate) {
         onUpdate(
             model.position,
